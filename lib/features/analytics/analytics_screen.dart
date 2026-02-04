@@ -9,6 +9,8 @@ import '../../config/theme.dart';
 import '../../shared/providers/user_provider.dart';
 import '../../shared/widgets/cyber_card.dart';
 import '../../shared/models/quest.dart';
+import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
 
 class AnalyticsScreen extends ConsumerWidget {
   const AnalyticsScreen({super.key});
@@ -146,10 +148,13 @@ class AnalyticsScreen extends ConsumerWidget {
       entry.totalMs += log.totalMs;
       entry.sessions += 1;
       if (log.expectedMinutes != null) {
-        entry.expectedMinutes += log.expectedMinutes!;
+        entry.sessionsWithExpected += 1;
+        entry.expectedMinutesSum += log.expectedMinutes!;
+      } else {
+        entry.sessionsWithoutExpected += 1;
       }
       if (log.deltaMinutes != null) {
-        entry.deltaMinutes += log.deltaMinutes!;
+        entry.deltaMinutesSum += log.deltaMinutes!;
       }
       entry.earnedXp += log.earnedExp;
       analytics[id] = entry;
@@ -170,18 +175,22 @@ class AnalyticsScreen extends ConsumerWidget {
           'Analytics',
           style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold),
         ),
+        actions: const [
+          AiInboxBellAction(),
+        ],
       ),
-      body: list.isEmpty
-          ? const Center(
-              child: Text(
-                'No focus sessions yet.',
-                style: TextStyle(color: AppTheme.textSecondary),
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: list.length + 1,
-              itemBuilder: (context, index) {
+      body: PageEntrance(
+        child: list.isEmpty
+            ? const Center(
+                child: Text(
+                  'No focus sessions yet.',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: list.length + 1,
+                itemBuilder: (context, index) {
                 if (index == 0) {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -315,18 +324,24 @@ class AnalyticsScreen extends ConsumerWidget {
                 }
 
                 final entry = list[index - 1];
-                final expected = entry.expectedMinutes;
-                final delta = entry.deltaMinutes;
-                final deltaLabel = delta == 0
+                final expected = entry.avgExpectedMinutes;
+                final delta = entry.avgDeltaMinutes;
+
+                final bool hasExpected = entry.sessionsWithExpected > 0;
+                final deltaLabel = !hasExpected
+                  ? 'No expected length'
+                  : delta == 0
                     ? 'On time'
                     : delta > 0
-                        ? '${delta}m faster'
-                        : '${delta.abs()}m over';
-                final deltaColor = delta == 0
+                      ? '${delta}m faster'
+                      : '${delta.abs()}m over';
+                final deltaColor = !hasExpected
+                  ? AppTheme.textSecondary
+                  : delta == 0
                     ? AppTheme.textSecondary
                     : delta > 0
-                        ? Colors.greenAccent
-                        : Colors.redAccent;
+                      ? Colors.greenAccent
+                      : Colors.redAccent;
 
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 16.0),
@@ -340,12 +355,15 @@ class AnalyticsScreen extends ConsumerWidget {
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
                           children: [
                             _statChip('Sessions', '${entry.sessions}'),
                             _statChip('Time', _formatDuration(entry.totalMs)),
                             _statChip('XP', '${entry.earnedXp}'),
+                            _statChip('With expected', '${entry.sessionsWithExpected}'),
+                            _statChip('No expected', '${entry.sessionsWithoutExpected}'),
                           ],
                         ),
                         const SizedBox(height: 12),
@@ -353,7 +371,7 @@ class AnalyticsScreen extends ConsumerWidget {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              expected == 0 ? 'Expected: --' : 'Expected: ${expected}m',
+                              expected == 0 ? 'Expected: --' : 'Expected (avg): ${expected}m',
                               style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                             ),
                             Text(
@@ -366,8 +384,9 @@ class AnalyticsScreen extends ConsumerWidget {
                     ),
                   ),
                 );
-              },
-            ),
+                },
+              ),
+      ),
     );
   }
 
@@ -586,9 +605,21 @@ class _MissionAnalytics {
   final String title;
   int totalMs = 0;
   int sessions = 0;
-  int expectedMinutes = 0;
-  int deltaMinutes = 0;
+  int sessionsWithExpected = 0;
+  int sessionsWithoutExpected = 0;
+  int expectedMinutesSum = 0;
+  int deltaMinutesSum = 0;
   int earnedXp = 0;
+
+  int get avgExpectedMinutes {
+    if (sessionsWithExpected <= 0) return 0;
+    return (expectedMinutesSum / sessionsWithExpected).round();
+  }
+
+  int get avgDeltaMinutes {
+    if (sessionsWithExpected <= 0) return 0;
+    return (deltaMinutesSum / sessionsWithExpected).round();
+  }
 
   _MissionAnalytics({required this.id, required this.title});
 }

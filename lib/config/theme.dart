@@ -1,6 +1,5 @@
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   static const Color background = Color(0xFF0a0e14);
@@ -11,6 +10,7 @@ class AppTheme {
   static const Color textSecondary = Color(0xFF8bacc1);
 
   static ThemeData get darkTheme {
+    final baseTextTheme = ThemeData.dark().textTheme;
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
@@ -20,9 +20,9 @@ class AppTheme {
         surface: background,
         onSurface: textPrimary,
       ),
-      textTheme: GoogleFonts.interTextTheme(
-        ThemeData.dark().textTheme,
-      ).apply(
+      // Avoid runtime Google Fonts fetching on Android (offline-safe).
+      // If you want a custom font later, prefer bundling it as an asset in pubspec.
+      textTheme: baseTextTheme.apply(
         bodyColor: textPrimary,
         displayColor: textPrimary,
       ),

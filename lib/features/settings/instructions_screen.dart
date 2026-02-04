@@ -4,6 +4,8 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../config/theme.dart';
 import '../../shared/widgets/cyber_card.dart';
+import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
 
 class InstructionsScreen extends StatelessWidget {
   const InstructionsScreen({super.key});
@@ -16,17 +18,27 @@ class InstructionsScreen extends StatelessWidget {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(LucideIcons.chevronLeft),
-          onPressed: () => context.pop(),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/settings');
+            }
+          },
         ),
         title: const Text('Instructions', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+        actions: const [
+          AiInboxBellAction(),
+        ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: CyberCard(
+      body: PageEntrance(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
+          child: CyberCard(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
               Text('How to use Focus GG', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
               SizedBox(height: 12),
               Text(
@@ -43,7 +55,8 @@ class InstructionsScreen extends StatelessWidget {
                 'Tip: If you feel stuck, make missions smaller and time-box them with Pomodoro.',
                 style: TextStyle(color: AppTheme.textSecondary),
               ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

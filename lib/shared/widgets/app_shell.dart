@@ -1,24 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../config/theme.dart';
 
-class AppShell extends StatelessWidget {
+class AppShell extends ConsumerWidget {
   final Widget child;
   final String currentRoute;
 
-  const AppShell({
-    super.key,
-    required this.child,
-    required this.currentRoute,
-  });
+  const AppShell({super.key, required this.child, required this.currentRoute});
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: child,
-      bottomNavigationBar: _buildBottomNav(context),
-    );
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(body: child, bottomNavigationBar: _buildBottomNav(context));
   }
 
   Widget _buildBottomNav(BuildContext context) {
@@ -26,12 +20,38 @@ class AppShell extends StatelessWidget {
       _NavItem(icon: LucideIcons.home, label: 'Home', route: '/'),
       _NavItem(icon: LucideIcons.target, label: 'Missions', route: '/quests'),
       _NavItem(icon: LucideIcons.focus, label: 'Focus', route: '/focus'),
-      _NavItem(icon: LucideIcons.lineChart, label: 'Analytics', route: '/stats'),
-      _NavItem(icon: LucideIcons.package, label: 'Inventory', route: '/inventory'),
-      _NavItem(icon: LucideIcons.shield, label: 'Equipment', route: '/equipment'),
+      _NavItem(
+        icon: LucideIcons.calendarDays,
+        label: 'Calendar',
+        route: '/calendar',
+      ),
+      _NavItem(
+        icon: LucideIcons.checkSquare,
+        label: 'Habits',
+        route: '/habits',
+      ),
+      _NavItem(
+        icon: LucideIcons.lineChart,
+        label: 'Analytics',
+        route: '/stats',
+      ),
+      _NavItem(
+        icon: LucideIcons.package,
+        label: 'Inventory',
+        route: '/inventory',
+      ),
+      _NavItem(
+        icon: LucideIcons.shield,
+        label: 'Equipment',
+        route: '/equipment',
+      ),
       _NavItem(icon: LucideIcons.swords, label: 'Combat', route: '/combat'),
       _NavItem(icon: LucideIcons.bookOpen, label: 'Skills', route: '/skills'),
-      _NavItem(icon: LucideIcons.settings, label: 'Settings', route: '/settings'),
+      _NavItem(
+        icon: LucideIcons.settings,
+        label: 'Settings',
+        route: '/settings',
+      ),
     ];
 
     int currentIndex = items.indexWhere((item) => item.route == currentRoute);
@@ -70,14 +90,19 @@ class AppShell extends StatelessWidget {
                       onTap: () => context.go(item.route),
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
-                          color: isActive 
-                              ? AppTheme.primary.withOpacity(0.1) 
+                          color: isActive
+                              ? AppTheme.primary.withOpacity(0.1)
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(12),
                           border: isActive
-                              ? Border.all(color: AppTheme.primary.withOpacity(0.3))
+                              ? Border.all(
+                                  color: AppTheme.primary.withOpacity(0.3),
+                                )
                               : null,
                         ),
                         child: Column(
@@ -87,15 +112,21 @@ class AppShell extends StatelessWidget {
                             Icon(
                               item.icon,
                               size: 20,
-                              color: isActive ? AppTheme.primary : AppTheme.textSecondary,
+                              color: isActive
+                                  ? AppTheme.primary
+                                  : AppTheme.textSecondary,
                             ),
                             const SizedBox(height: 2),
                             Text(
                               item.label,
                               style: TextStyle(
                                 fontSize: 9,
-                                color: isActive ? AppTheme.primary : AppTheme.textSecondary,
-                                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                                color: isActive
+                                    ? AppTheme.primary
+                                    : AppTheme.textSecondary,
+                                fontWeight: isActive
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
                               ),
                             ),
                           ],

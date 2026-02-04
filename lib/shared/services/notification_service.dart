@@ -170,6 +170,72 @@ class NotificationService {
     }
   }
 
+  Future<void> scheduleEventReminder({
+    required String eventId,
+    required String title,
+    required DateTime startAt,
+    required bool allDay,
+    required int hourIfAllDay,
+    required int minutesBefore,
+  }) async {
+    try {
+      await ensureInitialized();
+      if (!_initialized) return;
+
+      final id = _idForKey('event:$eventId');
+
+      tz.TZDateTime when;
+      if (allDay) {
+        when = tz.TZDateTime(
+          tz.local,
+          startAt.year,
+          startAt.month,
+          startAt.day,
+          hourIfAllDay.clamp(0, 23),
+          0,
+        );
+      } else {
+        when = tz.TZDateTime.from(startAt, tz.local);
+      }
+
+      final before = Duration(minutes: minutesBefore.clamp(0, 24 * 60));
+      when = when.subtract(before);
+
+      if (when.isBefore(tz.TZDateTime.now(tz.local))) return;
+
+      final androidDetails = AndroidNotificationDetails(
+        'calendar_events',
+        'Calendar event reminders',
+        channelDescription: 'Reminders for your calendar events',
+        importance: Importance.defaultImportance,
+        priority: Priority.defaultPriority,
+      );
+
+      await _plugin.zonedSchedule(
+        id,
+        'Event reminder',
+        title,
+        when,
+        NotificationDetails(android: androidDetails),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: null,
+      );
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  Future<void> cancelEventReminder(String eventId) async {
+    try {
+      await ensureInitialized();
+      if (!_initialized) return;
+      await _plugin.cancel(_idForKey('event:$eventId'));
+    } catch (_) {
+      // ignore
+    }
+  }
+
   /// Helper used by UI to create consistent durations.
   Duration pausedReminderDelayMinutes(int minutes) {
     return Duration(minutes: max(1, minutes));

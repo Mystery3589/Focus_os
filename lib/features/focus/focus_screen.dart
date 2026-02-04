@@ -1,5 +1,6 @@
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -14,6 +15,8 @@ import '../../shared/models/focus_session.dart';
 import '../../shared/models/quest.dart';
 import '../../shared/models/user_stats.dart';
 import '../../shared/widgets/page_container.dart';
+import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
 
 class FocusScreen extends ConsumerStatefulWidget {
   final String? initialMissionId;
@@ -136,6 +139,18 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
     return "$hh:$mm:$ss";
   }
 
+  ({String hh, String mm, String ss}) _durationParts(int ms) {
+    if (ms < 0) ms = 0;
+    final totalSeconds = (ms / 1000).floor();
+    final hours = (totalSeconds / 3600).floor();
+    final minutes = ((totalSeconds % 3600) / 60).floor();
+    final seconds = totalSeconds % 60;
+    final hh = hours.toString().padLeft(2, '0');
+    final mm = minutes.toString().padLeft(2, '0');
+    final ss = seconds.toString().padLeft(2, '0');
+    return (hh: hh, mm: mm, ss: ss);
+  }
+
   int _calculateElapsed(FocusOpenSession? session) {
     if (session == null) return 0;
     
@@ -220,13 +235,25 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
           onPressed: () => context.go('/'),
         ),
         title: Row(
-          children: const [
-            Icon(LucideIcons.timer, color: AppTheme.primary),
-            SizedBox(width: 8),
-            Text("Focus", style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(LucideIcons.timer, color: AppTheme.primary),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'Focus',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppTheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ],
         ),
         actions: [
+          const AiInboxBellAction(),
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
             child: Center(
@@ -236,21 +263,32 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                   color: const Color(0xFF1e2a3a),
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: const Text(
-                  "One mission at a time",
-                  style: TextStyle(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.w600),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 160),
+                  child: const Text(
+                    'One mission at a time',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    style: TextStyle(
+                      color: AppTheme.primary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.only(bottom: 96),
-        child: PageContainer(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+      body: PageEntrance(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 96),
+          child: PageContainer(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               CyberCard(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
@@ -335,14 +373,27 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 10),
-                            Text(
-                              _formatDuration(displayMs),
-                              style: const TextStyle(
-                                fontSize: 60,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.textPrimary,
-                                fontFeatures: [FontFeature.tabularFigures()],
-                              ),
+                            Builder(
+                              builder: (context) {
+                                if (settings.clockStyle == 'flip') {
+                                  final p = _durationParts(displayMs);
+                                  return _FlipClock(
+                                    hh: p.hh,
+                                    mm: p.mm,
+                                    ss: p.ss,
+                                  );
+                                }
+
+                                return Text(
+                                  _formatDuration(displayMs),
+                                  style: const TextStyle(
+                                    fontSize: 60,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.textPrimary,
+                                    fontFeatures: [FontFeature.tabularFigures()],
+                                  ),
+                                );
+                              },
                             ),
                             if (settings.mode == 'pomodoro' && selectedSession != null)
                               Padding(
@@ -366,7 +417,8 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
               const SizedBox(height: 16),
 
               _buildRecentSessions(userStats, missions),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -797,5 +849,210 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
     final m = dt.minute.toString().padLeft(2, '0');
     final suffix = dt.hour >= 12 ? 'pm' : 'am';
     return "$h:$m $suffix";
+  }
+}
+
+class _FlipClock extends StatelessWidget {
+  final String hh;
+  final String mm;
+  final String ss;
+
+  const _FlipClock({
+    required this.hh,
+    required this.mm,
+    required this.ss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        // Keep it big, but responsive for smaller layouts.
+        final maxW = c.maxWidth.isFinite ? c.maxWidth : 640.0;
+        final digitW = (maxW / 12).clamp(34.0, 64.0);
+        final digitH = (digitW * 1.35).clamp(48.0, 88.0);
+        final gap = (digitW * 0.12).clamp(4.0, 10.0);
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _FlipNumber(value: hh, digitWidth: digitW, digitHeight: digitH, gap: gap),
+            SizedBox(width: gap),
+            _FlipColon(height: digitH),
+            SizedBox(width: gap),
+            _FlipNumber(value: mm, digitWidth: digitW, digitHeight: digitH, gap: gap),
+            SizedBox(width: gap),
+            _FlipColon(height: digitH),
+            SizedBox(width: gap),
+            _FlipNumber(value: ss, digitWidth: digitW, digitHeight: digitH, gap: gap),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _FlipColon extends StatelessWidget {
+  final double height;
+  const _FlipColon({required this.height});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: height,
+      child: Center(
+        child: Text(
+          ':',
+          style: TextStyle(
+            color: AppTheme.textSecondary.withOpacity(0.95),
+            fontSize: height * 0.55,
+            fontWeight: FontWeight.w800,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FlipNumber extends StatelessWidget {
+  final String value;
+  final double digitWidth;
+  final double digitHeight;
+  final double gap;
+
+  const _FlipNumber({
+    required this.value,
+    required this.digitWidth,
+    required this.digitHeight,
+    required this.gap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final s = value.padLeft(2, '0');
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _FlipDigit(digit: s[0], width: digitWidth, height: digitHeight),
+        SizedBox(width: gap),
+        _FlipDigit(digit: s[1], width: digitWidth, height: digitHeight),
+      ],
+    );
+  }
+}
+
+class _FlipDigit extends StatelessWidget {
+  final String digit;
+  final double width;
+  final double height;
+
+  const _FlipDigit({
+    required this.digit,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: height,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 240),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, anim) {
+          return AnimatedBuilder(
+            animation: anim,
+            child: child,
+            builder: (context, child) {
+              // Make the switch feel like a flip (rotateX with subtle perspective).
+              final t = anim.value;
+              final angle = (1.0 - t) * (math.pi / 2);
+              final m = Matrix4.identity()..setEntry(3, 2, 0.002);
+              m.rotateX(angle);
+              return Transform(
+                alignment: Alignment.center,
+                transform: m,
+                child: Opacity(
+                  opacity: (0.25 + 0.75 * t).clamp(0.0, 1.0),
+                  child: child,
+                ),
+              );
+            },
+          );
+        },
+        child: _FlipDigitFace(
+          key: ValueKey<String>(digit),
+          digit: digit,
+          width: width,
+          height: height,
+        ),
+      ),
+    );
+  }
+}
+
+class _FlipDigitFace extends StatelessWidget {
+  final String digit;
+  final double width;
+  final double height;
+
+  const _FlipDigitFace({
+    super.key,
+    required this.digit,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = AppTheme.cardBg;
+    final border = AppTheme.primary.withOpacity(0.35);
+    final divider = AppTheme.borderColor.withOpacity(0.35);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withOpacity(0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          // Split line.
+          Positioned(
+            left: 8,
+            right: 8,
+            top: height / 2,
+            child: Container(
+              height: 1,
+              color: divider,
+            ),
+          ),
+          // Digit.
+          Center(
+            child: Text(
+              digit,
+              style: TextStyle(
+                fontSize: height * 0.75,
+                height: 1.0,
+                fontWeight: FontWeight.w900,
+                color: AppTheme.textPrimary,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

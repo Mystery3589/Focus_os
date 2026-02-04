@@ -13,6 +13,8 @@ import '../../shared/providers/user_provider.dart';
 import '../../shared/models/focus_session.dart';
 import '../../shared/services/local_backup_service.dart';
 import '../../shared/widgets/cyber_card.dart';
+import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -52,14 +54,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: 'Profile',
         subtitle: 'Name, job, title',
         icon: LucideIcons.user,
-        onTap: () => context.go('/settings/profile'),
+        onTap: () => context.push('/settings/profile'),
         keywords: const ['profile', 'name', 'job', 'title', 'player'],
       ),
       _SettingsOption(
         title: 'Instructions',
         subtitle: 'How to use the app',
         icon: LucideIcons.bookOpen,
-        onTap: () => context.go('/settings/instructions'),
+        onTap: () => context.push('/settings/instructions'),
         keywords: const ['instructions', 'help', 'guide', 'how', 'tutorial'],
       ),
       _SettingsOption(
@@ -80,7 +82,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: 'Cloud sync',
         subtitle: 'Google Drive (App data)',
         icon: LucideIcons.cloud,
-        onTap: () => context.go('/settings/sync'),
+        onTap: () => context.push('/settings/sync'),
         keywords: const ['cloud', 'sync', 'google', 'drive', 'backup', 'restore'],
       ),
       _SettingsOption(
@@ -110,12 +112,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           onPressed: () => context.go('/'),
         ),
         title: const Text('Settings', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+        actions: const [
+          AiInboxBellAction(),
+        ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: PageEntrance(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
             CyberCard(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -175,7 +181,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ],
                     ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -492,7 +499,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _showFocusDefaultsDialog(BuildContext context, WidgetRef ref, FocusSettings current) {
     final focusMins = TextEditingController(text: current.pomodoro.focusMinutes.toString());
     final breakMins = TextEditingController(text: current.pomodoro.breakMinutes.toString());
+    final pausedReminderMins = TextEditingController(text: current.notifications.pausedMissionReminderMinutes.toString());
+    final dueReminderHour = TextEditingController(text: current.notifications.dueDateReminderHour.toString());
+    final eventReminderHour = TextEditingController(text: current.notifications.eventReminderHour.toString());
     var mode = current.mode;
+    var clockStyle = current.clockStyle;
+
+    var notifEnabled = current.notifications.enabled;
+    var pausedReminder = current.notifications.pausedMissionReminder;
+    var dueReminder = current.notifications.dueDateReminder;
+    var eventReminder = current.notifications.eventReminder;
 
     showDialog(
       context: context,
@@ -519,48 +535,132 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               content: SizedBox(
                 width: 520,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Default mode', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        ChoiceChip(
-                          label: const Text('Pomodoro'),
-                          selected: mode == 'pomodoro',
-                          onSelected: (_) => setState(() => mode = 'pomodoro'),
-                          selectedColor: AppTheme.primary,
-                          labelStyle: TextStyle(color: mode == 'pomodoro' ? Colors.black : AppTheme.textSecondary),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Default mode', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Pomodoro'),
+                            selected: mode == 'pomodoro',
+                            onSelected: (_) => setState(() => mode = 'pomodoro'),
+                            selectedColor: AppTheme.primary,
+                            labelStyle: TextStyle(color: mode == 'pomodoro' ? Colors.black : AppTheme.textSecondary),
+                          ),
+                          ChoiceChip(
+                            label: const Text('Stopwatch'),
+                            selected: mode == 'stopwatch',
+                            onSelected: (_) => setState(() => mode = 'stopwatch'),
+                            selectedColor: AppTheme.primary,
+                            labelStyle: TextStyle(color: mode == 'stopwatch' ? Colors.black : AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 14),
+                      const Text('Clock style', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Normal'),
+                            selected: clockStyle == 'normal',
+                            onSelected: (_) => setState(() => clockStyle = 'normal'),
+                            selectedColor: AppTheme.primary,
+                            labelStyle: TextStyle(color: clockStyle == 'normal' ? Colors.black : AppTheme.textSecondary),
+                          ),
+                          ChoiceChip(
+                            label: const Text('Flip'),
+                            selected: clockStyle == 'flip',
+                            onSelected: (_) => setState(() => clockStyle = 'flip'),
+                            selectedColor: AppTheme.primary,
+                            labelStyle: TextStyle(color: clockStyle == 'flip' ? Colors.black : AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 14),
+                      const Text('Pomodoro defaults', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _numField(label: 'Focus (minutes)', controller: focusMins),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _numField(label: 'Break (minutes)', controller: breakMins),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      const Text('Custom sessions earn 1 XP/min.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+
+                      const SizedBox(height: 14),
+                      const Text('Notifications', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                      const SizedBox(height: 6),
+                      SwitchListTile(
+                        value: notifEnabled,
+                        onChanged: (v) => setState(() => notifEnabled = v),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Enable notifications', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                        subtitle: const Text('Requires permission (Android).', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                      ),
+
+                      const SizedBox(height: 4),
+                      SwitchListTile(
+                        value: pausedReminder,
+                        onChanged: notifEnabled ? (v) => setState(() => pausedReminder = v) : null,
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Paused mission reminder', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                      ),
+                      if (notifEnabled && pausedReminder)
+                        Row(
+                          children: [
+                            Expanded(child: _numField(label: 'After (minutes)', controller: pausedReminderMins)),
+                          ],
                         ),
-                        ChoiceChip(
-                          label: const Text('Stopwatch'),
-                          selected: mode == 'stopwatch',
-                          onSelected: (_) => setState(() => mode = 'stopwatch'),
-                          selectedColor: AppTheme.primary,
-                          labelStyle: TextStyle(color: mode == 'stopwatch' ? Colors.black : AppTheme.textSecondary),
+
+                      const SizedBox(height: 6),
+                      SwitchListTile(
+                        value: dueReminder,
+                        onChanged: notifEnabled ? (v) => setState(() => dueReminder = v) : null,
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Mission due-date reminders', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                      ),
+                      if (notifEnabled && dueReminder)
+                        Row(
+                          children: [
+                            Expanded(child: _numField(label: 'Due reminder hour (0-23)', controller: dueReminderHour)),
+                          ],
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    const Text('Pomodoro defaults', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _numField(label: 'Focus (minutes)', controller: focusMins),
+
+                      const SizedBox(height: 6),
+                      SwitchListTile(
+                        value: eventReminder,
+                        onChanged: notifEnabled ? (v) => setState(() => eventReminder = v) : null,
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Calendar event reminders', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                        subtitle: const Text('Only for events where “Remind me” is enabled.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                      ),
+                      if (notifEnabled && eventReminder)
+                        Row(
+                          children: [
+                            Expanded(child: _numField(label: 'Event reminder hour (0-23)', controller: eventReminderHour)),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _numField(label: 'Break (minutes)', controller: breakMins),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    const Text('Custom sessions earn 1 XP/min.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               actions: [
@@ -572,10 +672,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   onPressed: () {
                     final f = (int.tryParse(focusMins.text) ?? current.pomodoro.focusMinutes).clamp(1, 999);
                     final b = (int.tryParse(breakMins.text) ?? current.pomodoro.breakMinutes).clamp(1, 999);
+
+                    final pausedM = (int.tryParse(pausedReminderMins.text) ?? current.notifications.pausedMissionReminderMinutes).clamp(1, 24 * 60);
+                    final dueH = (int.tryParse(dueReminderHour.text) ?? current.notifications.dueDateReminderHour).clamp(0, 23);
+                    final eventH = (int.tryParse(eventReminderHour.text) ?? current.notifications.eventReminderHour).clamp(0, 23);
+
                     ref.read(userProvider.notifier).updateFocusSettings(
                           current.copyWith(
                             mode: mode,
+                            clockStyle: clockStyle,
                             pomodoro: current.pomodoro.copyWith(focusMinutes: f, breakMinutes: b),
+                            notifications: current.notifications.copyWith(
+                              enabled: notifEnabled,
+                              pausedMissionReminder: pausedReminder,
+                              pausedMissionReminderMinutes: pausedM,
+                              dueDateReminder: dueReminder,
+                              dueDateReminderHour: dueH,
+                              eventReminder: eventReminder,
+                              eventReminderHour: eventH,
+                            ),
                           ),
                         );
                     Navigator.of(context).pop();
@@ -591,6 +706,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ).then((_) {
       focusMins.dispose();
       breakMins.dispose();
+      pausedReminderMins.dispose();
+      dueReminderHour.dispose();
+      eventReminderHour.dispose();
     });
   }
 

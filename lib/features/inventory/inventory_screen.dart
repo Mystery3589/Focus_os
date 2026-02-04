@@ -10,6 +10,8 @@ import '../../shared/widgets/cyber_card.dart';
 import '../../shared/widgets/cyber_button.dart';
 import '../../shared/models/inventory_item.dart';
 import '../../shared/widgets/page_container.dart';
+import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
 
 class InventoryScreen extends ConsumerStatefulWidget {
   const InventoryScreen({super.key});
@@ -69,6 +71,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> with SingleTi
         ),
         title: const Text("Inventory", style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
         actions: [
+          const AiInboxBellAction(),
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
             child: Center(
@@ -89,9 +92,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> with SingleTi
           )
         ],
       ),
-      body: PageContainer(
-        child: Column(
-          children: [
+      body: PageEntrance(
+        child: PageContainer(
+          child: Column(
+            children: [
             CyberCard(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
@@ -146,7 +150,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> with SingleTi
                 ],
               ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -168,11 +173,17 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> with SingleTi
       builder: (context, constraints) {
         // Wide, web-like cards: prefer fewer columns with large max extent.
         final maxExtent = constraints.maxWidth >= 980 ? 520.0 : 420.0;
+
+        // On narrow phones, fractional grid sizing can make the card's internal
+        // Column overflow by sub-pixel amounts (e.g. 0.4px). Make tiles a touch
+        // taller to keep layout stable across device pixel ratios.
+        final isNarrow = constraints.maxWidth < 420;
+        final childAspectRatio = isNarrow ? 2.40 : 2.55;
         return GridView.builder(
           padding: EdgeInsets.zero,
           gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: maxExtent,
-            childAspectRatio: 2.55,
+            childAspectRatio: childAspectRatio,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
           ),
@@ -222,68 +233,107 @@ class _InventoryItemCard extends StatelessWidget {
           // Rarity Strip
           Container(height: 4, color: rarityColor),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Some device widths/pixel ratios yield very short grid tiles.
+                // Keep the card readable, but compact enough to avoid RenderFlex
+                // overflows when the available height is tight (e.g. ~100px).
+                // Note: the inner Column can be ~100px tall after padding, while
+                // the LayoutBuilder itself sees a larger height. Use a threshold
+                // that matches observed grid-tile heights.
+                final isCompact = constraints.maxHeight <= 132;
+                final verticalPadding = isCompact ? 6.0 : 12.0;
+                final gap = isCompact ? 4.0 : 8.0;
+                final titleFontSize = isCompact ? 13.0 : 15.0;
+                final descriptionMaxLines = isCompact ? 1 : 2;
+                final descriptionFontSize = isCompact ? 11.0 : 12.0;
+                final detailsIconSize = isCompact ? 13.0 : 14.0;
+                final detailsFontSize = isCompact ? 11.0 : 12.0;
+                final detailsGap = isCompact ? 5.0 : 8.0;
+
+                return Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 16.0,
+                    vertical: verticalPadding,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(
-                          item.name,
-                          style: TextStyle(
-                            color: rarityColor,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.name,
+                              style: TextStyle(
+                                color: rarityColor,
+                                fontWeight: FontWeight.bold,
+                                fontSize: titleFontSize,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          if (item.quantity > 1)
+                            Text(
+                              "x${item.quantity}",
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                        ],
+                      ),
+                      SizedBox(height: gap),
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: isCompact ? 3 : 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1e2a3a),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          item.type,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
                       ),
-                      if (item.quantity > 1)
-                        Text(
-                          "x${item.quantity}",
-                          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1e2a3a),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      item.type,
-                      style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    item.description,
-                    style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const Spacer(),
-                  Row(
-                    children: const [
-                      Icon(LucideIcons.info, size: 14, color: AppTheme.primary),
-                      SizedBox(width: 8),
+                      SizedBox(height: gap),
                       Text(
-                        "Details",
+                        item.description,
                         style: TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.primary,
-                          fontWeight: FontWeight.w600,
+                          fontSize: descriptionFontSize,
+                          color: AppTheme.textSecondary,
                         ),
+                        maxLines: descriptionMaxLines,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const Spacer(),
+                      Row(
+                        children: [
+                          Icon(
+                            LucideIcons.info,
+                            size: detailsIconSize,
+                            color: AppTheme.primary,
+                          ),
+                          SizedBox(width: detailsGap),
+                          Text(
+                            "Details",
+                            style: TextStyle(
+                              fontSize: detailsFontSize,
+                              color: AppTheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ],

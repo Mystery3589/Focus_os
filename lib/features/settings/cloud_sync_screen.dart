@@ -11,6 +11,8 @@ import '../../shared/providers/user_provider.dart';
 import '../../shared/services/drive_sync_service.dart';
 import '../../shared/services/local_backup_service.dart';
 import '../../shared/widgets/cyber_card.dart';
+import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
 
 class CloudSyncScreen extends ConsumerStatefulWidget {
   const CloudSyncScreen({super.key});
@@ -79,6 +81,7 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
         ),
         title: const Text('Cloud sync', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
         actions: [
+          const AiInboxBellAction(),
           IconButton(
             tooltip: 'Refresh',
             onPressed: _loading ? null : _refresh,
@@ -87,11 +90,12 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: PageEntrance(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
             CyberCard(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -311,7 +315,8 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, height: 1.3),
               ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );

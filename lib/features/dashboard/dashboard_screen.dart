@@ -102,59 +102,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
 
     _didPromptForName = true;
 
-    final controller = TextEditingController();
-    try {
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) {
-          return StatefulBuilder(
-            builder: (context, setState) {
-              final trimmed = controller.text.trim();
-              final canContinue = trimmed.isNotEmpty;
+    final pickedName = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _NamePromptDialog(),
+    );
 
-              return AlertDialog(
-                title: const Text('Welcome, Hunter'),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('What should we call you?'),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: controller,
-                      autofocus: true,
-                      textInputAction: TextInputAction.done,
-                      onChanged: (_) => setState(() {}),
-                      onSubmitted: (_) {
-                        if (!canContinue) return;
-                        ref.read(userProvider.notifier).updateProfile(name: trimmed);
-                        Navigator.of(context).pop();
-                      },
-                      decoration: const InputDecoration(
-                        hintText: 'Enter your name',
-                      ),
-                    ),
-                  ],
-                ),
-                actions: [
-                  ElevatedButton(
-                    onPressed: canContinue
-                        ? () {
-                            ref.read(userProvider.notifier).updateProfile(name: trimmed);
-                            Navigator.of(context).pop();
-                          }
-                        : null,
-                    child: const Text('Continue'),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      );
-    } finally {
-      controller.dispose();
+    if (!mounted) return;
+    final nameTrimmed = pickedName?.trim() ?? '';
+    if (nameTrimmed.isNotEmpty) {
+      // Update state only after the dialog has been dismissed to avoid lifecycle edge-cases.
+      ref.read(userProvider.notifier).updateProfile(name: nameTrimmed);
     }
   }
 
@@ -239,36 +197,41 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
           child: LayoutBuilder(
             builder: (context, constraints) {
               final wide = constraints.maxWidth >= 900;
+              final veryNarrow = constraints.maxWidth < 520;
 
               final levelBlock = Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        "${userStats.level}",
-                        style: const TextStyle(
-                          fontSize: 64,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primary,
-                          height: 1.0,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 8.0),
-                        child: Text(
-                          "LEVEL",
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: AppTheme.textSecondary,
-                            letterSpacing: 1.3,
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          "${userStats.level}",
+                          style: const TextStyle(
+                            fontSize: 64,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.primary,
+                            height: 1.0,
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 10),
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 8.0),
+                          child: Text(
+                            "LEVEL",
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textSecondary,
+                              letterSpacing: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _buildInfoLine("NAME", userStats.name.isEmpty ? "Unnamed" : userStats.name),
@@ -342,39 +305,75 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
 
                   const SizedBox(height: 14),
 
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: statsWrap),
-                      const SizedBox(width: 16),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          const Text(
-                            "Available Points",
-                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                          ),
-                          Text(
-                            "${userStats.statPoints}",
-                            style: const TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.primary,
-                              height: 1.1,
+                  if (veryNarrow)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        statsWrap,
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              "Available Points",
+                              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          CyberButton(
-                            text: "Allocate",
-                            variant: CyberButtonVariant.outline,
-                            onPressed: () {
-                              // TODO: wire to allocation page when available
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                            Text(
+                              "${userStats.statPoints}",
+                              style: const TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.primary,
+                                height: 1.1,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        CyberButton(
+                          text: "Allocate",
+                          variant: CyberButtonVariant.outline,
+                          fullWidth: true,
+                          onPressed: () {
+                            // TODO: wire to allocation page when available
+                          },
+                        ),
+                      ],
+                    )
+                  else
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: statsWrap),
+                        const SizedBox(width: 16),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text(
+                              "Available Points",
+                              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                            ),
+                            Text(
+                              "${userStats.statPoints}",
+                              style: const TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.primary,
+                                height: 1.1,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            CyberButton(
+                              text: "Allocate",
+                              variant: CyberButtonVariant.outline,
+                              onPressed: () {
+                                // TODO: wire to allocation page when available
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                 ],
               );
             },
@@ -423,7 +422,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
                 ),
               const SizedBox(width: 8),
               TextButton(
-                onPressed: () => _openAiInboxSheet(userStats),
+                onPressed: () => context.push('/ai-inbox'),
                 child: const Text('View'),
               ),
             ],
@@ -474,7 +473,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
     return GestureDetector(
       onTap: () {
         ref.read(userProvider.notifier).markAiInboxMessageRead(message.id);
-        _openAiInboxSheet(ref.read(userProvider));
+        context.push('/ai-inbox');
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -665,6 +664,58 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
     if (hours < 48) return '${hours}h ago';
     final days = (hours / 24).floor();
     return '${days}d ago';
+  }
+
+  Widget _buildNotificationBell({
+    required int unreadCount,
+    required VoidCallback onPressed,
+  }) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.background.withOpacity(0.65),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: AppTheme.borderColor.withOpacity(0.8)),
+              ),
+              child: const Icon(
+                LucideIcons.bell,
+                size: 18,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+        ),
+        if (unreadCount > 0)
+          Positioned(
+            top: -2,
+            right: -2,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppTheme.primary,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.black.withOpacity(0.35)),
+              ),
+              child: Text(
+                unreadCount > 99 ? '99+' : '$unreadCount',
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _buildInfoLine(String label, String value) {
@@ -861,6 +912,92 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
           ),
         );
       }).toList(),
+    );
+  }
+}
+
+class _NamePromptDialog extends StatefulWidget {
+  const _NamePromptDialog();
+
+  @override
+  State<_NamePromptDialog> createState() => _NamePromptDialogState();
+}
+
+class _NamePromptDialogState extends State<_NamePromptDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final trimmed = _controller.text.trim();
+    if (trimmed.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop(trimmed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxDialogWidth = constraints.maxWidth.clamp(0, 420.0).toDouble();
+        return AlertDialog(
+          scrollable: true,
+          title: const Text('Welcome, Hunter'),
+          content: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxDialogWidth),
+            child: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (context, value, _) {
+                final trimmed = value.text.trim();
+                final canContinue = trimmed.isNotEmpty;
+
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('What should we call you?'),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _controller,
+                      autofocus: true,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) {
+                        if (!canContinue) return;
+                        _submit();
+                      },
+                      decoration: const InputDecoration(
+                        hintText: 'Enter your name',
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          actions: [
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (context, value, _) {
+                final canContinue = value.text.trim().isNotEmpty;
+                return ElevatedButton(
+                  onPressed: canContinue ? _submit : null,
+                  child: const Text('Continue'),
+                );
+              },
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -3,6 +3,8 @@ import 'inventory_item.dart';
 import 'quest.dart';
 import 'focus_session.dart';
 import 'skill.dart';
+import 'user_event.dart';
+import 'habit.dart';
 
 class _Unset {
   const _Unset();
@@ -85,6 +87,8 @@ class UserStats {
   final Stats levelTaskWeights;
   final int? lastLevelUpAt;
   final List<SkillGoal> skills;
+  final List<UserEvent> userEvents;
+  final List<Habit> habits;
 
   UserStats({
     required this.name,
@@ -115,6 +119,8 @@ class UserStats {
     required this.levelTaskWeights,
     this.lastLevelUpAt,
     required this.skills,
+    required this.userEvents,
+    required this.habits,
   });
 
   factory UserStats.initial() {
@@ -171,6 +177,8 @@ class UserStats {
       levelTaskWeights: Stats(str: 1, agi: 1, per: 1, intStat: 1, vit: 1),
       lastLevelUpAt: null,
       skills: [],
+      userEvents: const [],
+      habits: const [],
     );
   }
 
@@ -208,6 +216,18 @@ class UserStats {
         .toList() ??
       <AiInboxMessage>[];
 
+    final userEvents = (json['userEvents'] as List?)
+        ?.whereType<Map>()
+        .map((e) => UserEvent.fromJson(Map<String, dynamic>.from(e)))
+        .toList() ??
+      <UserEvent>[];
+
+    final habits = (json['habits'] as List?)
+        ?.whereType<Map>()
+        .map((h) => Habit.fromJson(Map<String, dynamic>.from(h)))
+        .toList() ??
+      <Habit>[];
+
     return UserStats(
       name: json['name'] ?? "",
       level: json['level'] ?? 1,
@@ -237,6 +257,8 @@ class UserStats {
       levelTaskWeights: json['levelTaskWeights'] != null ? Stats.fromJson(json['levelTaskWeights']) : Stats(str: 1, agi: 1, per: 1, intStat: 1, vit: 1),
       lastLevelUpAt: json['lastLevelUpAt'],
       skills: (json['skills'] as List?)?.map((s) => SkillGoal.fromJson(s)).toList() ?? [],
+      userEvents: userEvents,
+      habits: habits,
     );
   }
 
@@ -270,6 +292,8 @@ class UserStats {
       'levelTaskWeights': levelTaskWeights.toJson(),
       'lastLevelUpAt': lastLevelUpAt,
       'skills': skills.map((s) => s.toJson()).toList(),
+      'userEvents': userEvents.map((e) => e.toJson()).toList(),
+      'habits': habits.map((h) => h.toJson()).toList(),
     };
   }
 
@@ -302,6 +326,8 @@ class UserStats {
     Stats? levelTaskWeights,
     int? lastLevelUpAt,
     List<SkillGoal>? skills,
+    List<UserEvent>? userEvents,
+    List<Habit>? habits,
   }) {
     return UserStats(
       name: name ?? this.name,
@@ -332,6 +358,8 @@ class UserStats {
       levelTaskWeights: levelTaskWeights ?? this.levelTaskWeights,
       lastLevelUpAt: lastLevelUpAt ?? this.lastLevelUpAt,
       skills: skills ?? this.skills,
+      userEvents: userEvents ?? this.userEvents,
+      habits: habits ?? this.habits,
     );
   }
 }

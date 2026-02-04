@@ -70,16 +70,43 @@ class CyberButton extends StatelessWidget {
         break;
     }
 
-    Widget content = Row(
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        if (icon != null) ...[
-          Icon(icon, size: 16, color: iconColor),
-          const SizedBox(width: 8),
-        ],
-        Text(text),
-      ],
+    Widget content = LayoutBuilder(
+      builder: (context, constraints) {
+        // CyberButton can be placed inside a Row, where children often receive
+        // unbounded width constraints. In that case, using Flexible/Expanded
+        // would throw:
+        //   "RenderFlex children have non-zero flex but incoming width constraints are unbounded."
+        final hasBoundedWidth = constraints.hasBoundedWidth && constraints.maxWidth.isFinite;
+
+        final textWidget = Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
+          textAlign: TextAlign.center,
+        );
+
+        final label = hasBoundedWidth
+            ? Flexible(child: textWidget)
+            : ConstrainedBox(
+                // Prevent a single long label from growing without bound when
+                // our own width is unconstrained (common inside Row).
+                constraints: const BoxConstraints(maxWidth: 260),
+                child: textWidget,
+              );
+
+        return Row(
+          mainAxisSize: hasBoundedWidth ? MainAxisSize.max : MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 16, color: iconColor),
+              const SizedBox(width: 8),
+            ],
+            label,
+          ],
+        );
+      },
     );
 
     if (fullWidth) {

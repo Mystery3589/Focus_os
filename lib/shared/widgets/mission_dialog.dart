@@ -53,6 +53,7 @@ Future<void> showMissionDialog(
   String frequency = quest?.frequency ?? 'none';
   String? selectedSkillId = quest?.skillId ?? presetSkillId;
 
+  bool useExpectedLength = quest?.expectedMinutes != null || !isEdit;
   int expectedValue = (quest?.expectedMinutes ?? 60);
   String expectedUnit = 'minutes';
   if (expectedValue >= 60 && expectedValue % 60 == 0) {
@@ -71,7 +72,11 @@ Future<void> showMissionDialog(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) {
-        final dialogMaxH = (MediaQuery.of(context).size.height * 0.88).clamp(420.0, 820.0).toDouble();
+        final media = MediaQuery.of(context);
+        // When the keyboard is open, the usable height shrinks. If we keep a fixed
+        // dialog height, the internal Column will overflow (commonly on Android).
+        final availableH = (media.size.height - media.viewInsets.bottom).clamp(0.0, double.infinity);
+        final dialogMaxH = (availableH * 0.88).clamp(420.0, 820.0).toDouble();
 
         final titleTrim = titleController.text.trim();
 
@@ -86,10 +91,12 @@ Future<void> showMissionDialog(
           titleError = 'Title is required';
         }
 
-        if (parsedExpected <= 0) {
-          expectedError = 'Enter a number greater than 0';
-        } else if (expectedMinutes > 24 * 60) {
-          expectedError = 'Keep expected length under 24 hours';
+        if (useExpectedLength) {
+          if (parsedExpected <= 0) {
+            expectedError = 'Enter a number greater than 0';
+          } else if (expectedMinutes > 24 * 60) {
+            expectedError = 'Keep expected length under 24 hours';
+          }
         }
 
         if (startDate != null && dueDate != null) {
@@ -101,7 +108,7 @@ Future<void> showMissionDialog(
         }
 
         final isValid = titleError == null && expectedError == null && dateError == null;
-        final previewXp = (expectedMinutes <= 0) ? 0 : _estimateXp(difficulty, expectedMinutes);
+        final previewXp = (!useExpectedLength || expectedMinutes <= 0) ? 0 : _estimateXp(difficulty, expectedMinutes);
 
         Widget sectionLabel(String text) {
           return Padding(
@@ -174,13 +181,15 @@ Future<void> showMissionDialog(
           );
         }
 
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: 560, maxHeight: dialogMaxH),
-            child: SizedBox(
-              height: dialogMaxH,
+        return AnimatedPadding(
+          padding: media.viewInsets + const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          child: Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.zero,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 560, maxHeight: dialogMaxH),
               child: Container(
                 decoration: BoxDecoration(
                   color: AppTheme.cardBg,
@@ -337,12 +346,44 @@ Future<void> showMissionDialog(
 
                               const SizedBox(height: 14),
 
-                              sectionLabel('Expected Length'),
+                              sectionLabel('Expected Length (optional)'),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: CheckboxListTile(
+                                      value: useExpectedLength,
+                                      onChanged: (v) {
+                                        setState(() {
+                                          useExpectedLength = v ?? false;
+                                          if (!useExpectedLength) {
+                                            // Keep the input around (in case the user toggles back on),
+                                            // but clear errors immediately.
+                                            showValidationErrors = false;
+                                          } else {
+                                            if ((int.tryParse(expectedController.text.trim()) ?? 0) <= 0) {
+                                              expectedController.text = expectedValue <= 0 ? '60' : expectedValue.toString();
+                                            }
+                                          }
+                                        });
+                                      },
+                                      dense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      title: const Text(
+                                        'Use expected length',
+                                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                                      ),
+                                      controlAffinity: ListTileControlAffinity.leading,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
                               Row(
                                 children: [
                                   Expanded(
                                     child: TextField(
                                       controller: expectedController,
+                                      enabled: useExpectedLength,
                                       keyboardType: TextInputType.number,
                                       style: const TextStyle(color: AppTheme.textPrimary),
                                       onChanged: (val) {
@@ -369,9 +410,11 @@ Future<void> showMissionDialog(
                                         DropdownMenuItem(value: 'minutes', child: Text('Minutes')),
                                         DropdownMenuItem(value: 'hours', child: Text('Hours')),
                                       ],
-                                      onChanged: (val) {
-                                        if (val != null) setState(() => expectedUnit = val);
-                                      },
+                                      onChanged: useExpectedLength
+                                          ? (val) {
+                                              if (val != null) setState(() => expectedUnit = val);
+                                            }
+                                          : null,
                                     ),
                                   ),
                                 ],
@@ -524,7 +567,9 @@ Future<void> showMissionDialog(
 
                               const SizedBox(height: 12),
                               Text(
-                                'XP is auto-calculated from difficulty and time: $previewXp XP',
+                                useExpectedLength
+                                    ? 'XP is estimated from difficulty and expected time: $previewXp XP'
+                                    : 'XP is calculated from difficulty and actual time (no expected length).',
                                 style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                               ),
                             ],
@@ -558,8 +603,11 @@ Future<void> showMissionDialog(
                                   return;
                                 }
 
-                                final expectedMinutesSave = expectedUnit == 'hours' ? expectedValue * 60 : expectedValue;
-                                final expReward = _estimateXp(difficulty, expectedMinutesSave);
+                                final int? expectedMinutesSave = useExpectedLength
+                                    ? (expectedUnit == 'hours' ? expectedValue * 60 : expectedValue)
+                                    : null;
+                                final expReward = expectedMinutesSave == null ? 0 : _estimateXp(difficulty, expectedMinutesSave);
+                                final rewardText = expectedMinutesSave == null ? 'XP based on time' : '$expReward XP';
 
                                 if (isEdit) {
                                   final wasLinkedToSkill = quest.skillId != null;
@@ -574,7 +622,7 @@ Future<void> showMissionDialog(
                                           title: titleController.text.trim(),
                                           description: descController.text.trim(),
                                           difficulty: difficulty,
-                                          reward: '$expReward XP',
+                                          reward: rewardText,
                                           expReward: expReward,
                                           priority: priority,
                                           skillId: selectedSkillId,
@@ -615,7 +663,7 @@ Future<void> showMissionDialog(
                                           id: DateTime.now().millisecondsSinceEpoch.toString(),
                                           title: titleController.text.trim(),
                                           description: descController.text.trim(),
-                                          reward: '$expReward XP',
+                                          reward: rewardText,
                                           difficulty: difficulty,
                                           priority: priority,
                                           progress: 0,
@@ -651,10 +699,14 @@ Future<void> showMissionDialog(
         );
       },
     ),
-  ).then((_) {
-    scrollController.dispose();
-    titleController.dispose();
-    descController.dispose();
-    expectedController.dispose();
-  });
+  );
+
+  // showDialog's Future completes when Navigator.pop is called, but the route
+  // may still be animating out. Delay disposal to avoid controllers being
+  // referenced during the dismiss animation.
+  await Future<void>.delayed(const Duration(milliseconds: 250));
+  scrollController.dispose();
+  titleController.dispose();
+  descController.dispose();
+  expectedController.dispose();
 }

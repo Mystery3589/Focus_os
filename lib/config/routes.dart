@@ -12,7 +12,34 @@ import '../features/settings/instructions_screen.dart';
 import '../features/settings/cloud_sync_screen.dart';
 import '../features/skills/skills_screen.dart';
 import '../features/combat/combat_screen.dart';
+import '../features/calendar/calendar_screen.dart';
+import '../features/habits/habits_screen.dart';
+import '../features/habits/habit_analytics_screen.dart';
+import '../features/ai_inbox/ai_inbox_screen.dart';
 import '../shared/widgets/app_shell.dart';
+
+CustomTransitionPage<void> _fadeSlidePage(GoRouterState state, Widget child) {
+  final tween = Tween<Offset>(
+    begin: const Offset(0.06, 0.0),
+    end: Offset.zero,
+  ).chain(CurveTween(curve: Curves.easeOutCubic));
+
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 240),
+    reverseTransitionDuration: const Duration(milliseconds: 200),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      return FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: animation.drive(tween),
+          child: child,
+        ),
+      );
+    },
+  );
+}
 
 // Placeholder screens for other routes to prevent errors until implemented
 class PlaceholderScreen extends StatelessWidget {
@@ -41,61 +68,80 @@ final router = GoRouter(
       routes: [
         GoRoute(
           path: '/',
-          builder: (context, state) => const DashboardScreen(),
+          pageBuilder: (context, state) => const NoTransitionPage(child: DashboardScreen()),
         ),
         GoRoute(
           path: '/quests',
-          builder: (context, state) => const QuestsScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const QuestsScreen()),
         ),
         GoRoute(
           path: '/equipment',
-          builder: (context, state) => const EquipmentScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const EquipmentScreen()),
         ),
         GoRoute(
           path: '/inventory',
-          builder: (context, state) => const InventoryScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const InventoryScreen()),
         ),
         GoRoute(
           path: '/focus',
-          builder: (context, state) {
+          pageBuilder: (context, state) {
             final missionId = state.uri.queryParameters['missionId'];
             final heading = state.uri.queryParameters['heading'];
             final autoStart = state.uri.queryParameters['autostart'];
             final extraId = state.extra as String?;
-            return FocusScreen(
+            return _fadeSlidePage(
+              state,
+              FocusScreen(
               initialMissionId: missionId ?? extraId,
               initialCustomHeading: heading,
               autoStartCustom: autoStart == '1' || autoStart == 'true',
+              ),
             );
           },
         ),
         GoRoute(
           path: '/stats',
-          builder: (context, state) => const AnalyticsScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const AnalyticsScreen()),
+        ),
+        GoRoute(
+          path: '/calendar',
+          pageBuilder: (context, state) => _fadeSlidePage(state, const CalendarScreen()),
+        ),
+        GoRoute(
+          path: '/habits',
+          pageBuilder: (context, state) => _fadeSlidePage(state, const HabitsScreen()),
+        ),
+        GoRoute(
+          path: '/habits/analytics',
+          pageBuilder: (context, state) => _fadeSlidePage(state, const HabitAnalyticsScreen()),
         ),
         GoRoute(
           path: '/combat',
-          builder: (context, state) => const CombatScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const CombatScreen()),
         ),
         GoRoute(
           path: '/skills',
-          builder: (context, state) => const SkillsScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const SkillsScreen()),
         ),
         GoRoute(
           path: '/settings',
-          builder: (context, state) => const SettingsScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const SettingsScreen()),
         ),
         GoRoute(
           path: '/settings/profile',
-          builder: (context, state) => const ProfileScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const ProfileScreen()),
         ),
         GoRoute(
           path: '/settings/instructions',
-          builder: (context, state) => const InstructionsScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const InstructionsScreen()),
         ),
         GoRoute(
           path: '/settings/sync',
-          builder: (context, state) => const CloudSyncScreen(),
+          pageBuilder: (context, state) => _fadeSlidePage(state, const CloudSyncScreen()),
+        ),
+        GoRoute(
+          path: '/ai-inbox',
+          pageBuilder: (context, state) => _fadeSlidePage(state, const AiInboxScreen()),
         ),
       ],
     ),

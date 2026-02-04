@@ -54,6 +54,8 @@ dependencies:
   extension_google_sign_in_as_googleapis_auth: ^2.0.12
   file_picker: ^8.3.7
   quick_actions: ^1.1.0
+  table_calendar: ^3.1.2
+  geoengine: ^1.0.8
 
 dev_dependencies:
   flutter_test:

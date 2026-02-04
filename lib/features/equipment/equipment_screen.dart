@@ -10,6 +10,8 @@ import '../../shared/widgets/cyber_card.dart';
 import '../../shared/widgets/equipment_card.dart';
 import '../../shared/models/user_stats.dart'; // import for accessing equipment model helper if needed
 import '../../shared/widgets/page_container.dart';
+import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
 
 class EquipmentScreen extends ConsumerStatefulWidget {
   const EquipmentScreen({super.key});
@@ -56,12 +58,16 @@ class _EquipmentScreenState extends ConsumerState<EquipmentScreen> with SingleTi
           onPressed: () => context.go('/'),
         ),
         title: const Text("Equipment", style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+        actions: const [
+          AiInboxBellAction(),
+        ],
       ),
-      body: SingleChildScrollView(
-        child: PageContainer(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+      body: PageEntrance(
+        child: SingleChildScrollView(
+          child: PageContainer(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               CyberCard(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -125,7 +131,8 @@ class _EquipmentScreenState extends ConsumerState<EquipmentScreen> with SingleTi
 
               const SizedBox(height: 16),
               _SetBonusSection(setBonuses: _collectSetBonuses(userStats.equipment)),
-            ],
+              ],
+            ),
           ),
         ),
       ),

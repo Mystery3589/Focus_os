@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import '../../config/theme.dart';
 import '../../shared/providers/user_provider.dart';
 import '../../shared/widgets/cyber_card.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
+import '../../shared/widgets/page_entrance.dart';
 import '../../shared/widgets/quest_card.dart';
 import '../../shared/widgets/mission_dialog.dart';
 import '../../shared/models/quest.dart';
@@ -122,6 +124,9 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
     final completedQuests = _filterAndSortQuests(userStats.quests, true, openSessions);
 
     return Scaffold(
+      // When the keyboard opens (including from modal dialogs), the viewInsets
+      // reduce available height. Keep this page layout resilient to those
+      // changes so we don't trigger RenderFlex overflows behind dialogs.
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -131,241 +136,253 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
         ),
         title: const Text("Missions", style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
         centerTitle: false,
+        actions: const [
+          AiInboxBellAction(),
+        ],
       ),
-      body: Column(
-        children: [
-          // Search and Sort
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                 CyberCard(
-                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                   child: Row(
-                     children: [
-                       const Icon(LucideIcons.search, size: 16, color: AppTheme.textSecondary),
-                       const SizedBox(width: 8),
-                       Expanded(
-                         child: TextField(
-                           controller: _searchController,
-                           onChanged: (val) => setState(() {}),
-                           decoration: const InputDecoration(
-                             hintText: "Search missions...",
-                             border: InputBorder.none,
-                             isDense: true,
-                           ),
-                           style: const TextStyle(color: AppTheme.textPrimary),
-                         ),
-                       ),
-                       if (_searchController.text.isNotEmpty)
-                         IconButton(
-                           tooltip: 'Clear search',
-                           icon: const Icon(LucideIcons.x, size: 16, color: AppTheme.textSecondary),
-                           onPressed: () {
-                             _searchController.clear();
-                             setState(() {});
-                           },
-                         ),
-                     ],
-                   ),
-                 ),
-                 const SizedBox(height: 16),
-                 CyberCard(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Row(
-                      children: [
-                        const Icon(LucideIcons.arrowUpDown, size: 16, color: AppTheme.textSecondary),
-                        const SizedBox(width: 8),
-                        const Text("Sort by:", style: TextStyle(color: AppTheme.textSecondary)),
-                        const SizedBox(width: 8),
-                        DropdownButton<String>(
-                          value: _sortBy,
-                          dropdownColor: AppTheme.background, // Should match card bg roughly
-                          underline: const SizedBox(),
-                          style: const TextStyle(color: AppTheme.textPrimary),
-                          items: const [
-                            DropdownMenuItem(value: 'latest', child: Text("Latest Created")),
-                            DropdownMenuItem(value: 'priority', child: Text("Priority (High to Low)")),
-                            DropdownMenuItem(value: 'difficulty', child: Text("Difficulty (Hard to Easy)")),
-                            DropdownMenuItem(value: 'due', child: Text("Due date (Soonest)")),
+      body: PageEntrance(
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Search / Sort / Filters can be tall. When the keyboard is open,
+              // allow this section to scroll instead of overflowing.
+              Flexible(
+                fit: FlexFit.loose,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      CyberCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.search, size: 16, color: AppTheme.textSecondary),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: _searchController,
+                                onChanged: (val) => setState(() {}),
+                                decoration: const InputDecoration(
+                                  hintText: "Search missions...",
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                ),
+                                style: const TextStyle(color: AppTheme.textPrimary),
+                              ),
+                            ),
+                            if (_searchController.text.isNotEmpty)
+                              IconButton(
+                                tooltip: 'Clear search',
+                                icon: const Icon(LucideIcons.x, size: 16, color: AppTheme.textSecondary),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() {});
+                                },
+                              ),
                           ],
-                          onChanged: (val) {
-                            if (val != null) setState(() => _sortBy = val);
-                          },
-                        )
-                      ],
-                    ),
-                 ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      CyberCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.arrowUpDown, size: 16, color: AppTheme.textSecondary),
+                            const SizedBox(width: 8),
+                            const Text("Sort by:", style: TextStyle(color: AppTheme.textSecondary)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: DropdownButton<String>(
+                                value: _sortBy,
+                                isExpanded: true,
+                                dropdownColor: AppTheme.background, // Should match card bg roughly
+                                underline: const SizedBox(),
+                                style: const TextStyle(color: AppTheme.textPrimary),
+                                items: const [
+                                  DropdownMenuItem(value: 'latest', child: Text("Latest Created")),
+                                  DropdownMenuItem(value: 'priority', child: Text("Priority (High to Low)")),
+                                  DropdownMenuItem(value: 'difficulty', child: Text("Difficulty (Hard to Easy)")),
+                                  DropdownMenuItem(value: 'due', child: Text("Due date (Soonest)")),
+                                ],
+                                onChanged: (val) {
+                                  if (val != null) setState(() => _sortBy = val);
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
 
-                 const SizedBox(height: 16),
-                 CyberCard(
-                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                   child: Column(
-                     crossAxisAlignment: CrossAxisAlignment.stretch,
-                     children: [
-                       Row(
-                         children: [
-                           const Icon(LucideIcons.filter, size: 16, color: AppTheme.textSecondary),
-                           const SizedBox(width: 8),
-                           const Text('Filters', style: TextStyle(color: AppTheme.textSecondary)),
-                           const Spacer(),
-                           TextButton(
-                             onPressed: () {
-                               setState(() {
-                                 _skillFilterId = null;
-                                 _statusFilter = 'all';
-                                 _difficultyFilter = 'all';
-                                 _priorityFilter = 'all';
-                               });
-                             },
-                             child: const Text('Clear', style: TextStyle(color: AppTheme.textSecondary)),
-                           ),
-                         ],
-                       ),
-                       const SizedBox(height: 10),
-                       Wrap(
-                         spacing: 12,
-                         runSpacing: 12,
-                         children: [
-                           SizedBox(
-                             width: 220,
-                             child: DropdownButtonFormField<String?>(
-                               value: _skillFilterId,
-                               dropdownColor: AppTheme.background,
-                               decoration: const InputDecoration(
-                                 labelText: 'Skill',
-                                 labelStyle: TextStyle(color: AppTheme.textSecondary),
-                                 filled: true,
-                                 fillColor: AppTheme.background,
-                                 border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
-                                 enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
-                               ),
-                               style: const TextStyle(color: AppTheme.textPrimary),
-                               items: [
-                                 const DropdownMenuItem<String?>(value: null, child: Text('All skills')),
-                                 ...userStats.skills.map(
-                                   (s) => DropdownMenuItem<String?>(value: s.id, child: Text(s.title)),
-                                 )
-                               ],
-                               onChanged: (val) => setState(() => _skillFilterId = val),
-                             ),
-                           ),
-                           SizedBox(
-                             width: 220,
-                             child: DropdownButtonFormField<String>(
-                               value: _statusFilter,
-                               dropdownColor: AppTheme.background,
-                               decoration: const InputDecoration(
-                                 labelText: 'Status (active tab)',
-                                 labelStyle: TextStyle(color: AppTheme.textSecondary),
-                                 filled: true,
-                                 fillColor: AppTheme.background,
-                                 border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
-                                 enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
-                               ),
-                               style: const TextStyle(color: AppTheme.textPrimary),
-                               items: const [
-                                 DropdownMenuItem(value: 'all', child: Text('All')),
-                                 DropdownMenuItem(value: 'none', child: Text('No session')),
-                                 DropdownMenuItem(value: 'running', child: Text('Running')),
-                                 DropdownMenuItem(value: 'paused', child: Text('Paused')),
-                                 DropdownMenuItem(value: 'abandoned', child: Text('Abandoned')),
-                               ],
-                               onChanged: (val) {
-                                 if (val == null) return;
-                                 setState(() => _statusFilter = val);
-                               },
-                             ),
-                           ),
-                           SizedBox(
-                             width: 180,
-                             child: DropdownButtonFormField<String>(
-                               value: _difficultyFilter,
-                               dropdownColor: AppTheme.background,
-                               decoration: const InputDecoration(
-                                 labelText: 'Difficulty',
-                                 labelStyle: TextStyle(color: AppTheme.textSecondary),
-                                 filled: true,
-                                 fillColor: AppTheme.background,
-                                 border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
-                                 enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
-                               ),
-                               style: const TextStyle(color: AppTheme.textPrimary),
-                               items: const [
-                                 DropdownMenuItem(value: 'all', child: Text('All')),
-                                 DropdownMenuItem(value: 'S', child: Text('S')),
-                                 DropdownMenuItem(value: 'A', child: Text('A')),
-                                 DropdownMenuItem(value: 'B', child: Text('B')),
-                                 DropdownMenuItem(value: 'C', child: Text('C')),
-                                 DropdownMenuItem(value: 'D', child: Text('D')),
-                               ],
-                               onChanged: (val) {
-                                 if (val == null) return;
-                                 setState(() => _difficultyFilter = val);
-                               },
-                             ),
-                           ),
-                           SizedBox(
-                             width: 180,
-                             child: DropdownButtonFormField<String>(
-                               value: _priorityFilter,
-                               dropdownColor: AppTheme.background,
-                               decoration: const InputDecoration(
-                                 labelText: 'Priority',
-                                 labelStyle: TextStyle(color: AppTheme.textSecondary),
-                                 filled: true,
-                                 fillColor: AppTheme.background,
-                                 border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
-                                 enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
-                               ),
-                               style: const TextStyle(color: AppTheme.textPrimary),
-                               items: const [
-                                 DropdownMenuItem(value: 'all', child: Text('All')),
-                                 DropdownMenuItem(value: 'S', child: Text('S')),
-                                 DropdownMenuItem(value: 'A', child: Text('A')),
-                                 DropdownMenuItem(value: 'B', child: Text('B')),
-                                 DropdownMenuItem(value: 'C', child: Text('C')),
-                                 DropdownMenuItem(value: 'D', child: Text('D')),
-                               ],
-                               onChanged: (val) {
-                                 if (val == null) return;
-                                 setState(() => _priorityFilter = val);
-                               },
-                             ),
-                           ),
-                         ],
-                       ),
-                     ],
-                   ),
-                 ),
-              ],
-            ),
-          ),
-          
-          // Tab Bar
-          TabBar(
-            controller: _tabController,
-            indicatorColor: AppTheme.primary,
-            labelColor: AppTheme.primary,
-            unselectedLabelColor: AppTheme.textSecondary,
-            tabs: const [
-              Tab(text: "Active"),
-              Tab(text: "Completed"),
+                      const SizedBox(height: 16),
+                      CyberCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(LucideIcons.filter, size: 16, color: AppTheme.textSecondary),
+                                const SizedBox(width: 8),
+                                const Text('Filters', style: TextStyle(color: AppTheme.textSecondary)),
+                                const Spacer(),
+                                TextButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      _skillFilterId = null;
+                                      _statusFilter = 'all';
+                                      _difficultyFilter = 'all';
+                                      _priorityFilter = 'all';
+                                    });
+                                  },
+                                  child: const Text('Clear', style: TextStyle(color: AppTheme.textSecondary)),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 12,
+                              runSpacing: 12,
+                              children: [
+                                SizedBox(
+                                  width: 220,
+                                  child: DropdownButtonFormField<String?>(
+                                    value: _skillFilterId,
+                                    dropdownColor: AppTheme.background,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Skill',
+                                      labelStyle: TextStyle(color: AppTheme.textSecondary),
+                                      filled: true,
+                                      fillColor: AppTheme.background,
+                                      border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
+                                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
+                                    ),
+                                    style: const TextStyle(color: AppTheme.textPrimary),
+                                    items: [
+                                      const DropdownMenuItem<String?>(value: null, child: Text('All skills')),
+                                      ...userStats.skills.map(
+                                        (s) => DropdownMenuItem<String?>(value: s.id, child: Text(s.title)),
+                                      )
+                                    ],
+                                    onChanged: (val) => setState(() => _skillFilterId = val),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 220,
+                                  child: DropdownButtonFormField<String>(
+                                    value: _statusFilter,
+                                    dropdownColor: AppTheme.background,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Status (active tab)',
+                                      labelStyle: TextStyle(color: AppTheme.textSecondary),
+                                      filled: true,
+                                      fillColor: AppTheme.background,
+                                      border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
+                                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
+                                    ),
+                                    style: const TextStyle(color: AppTheme.textPrimary),
+                                    items: const [
+                                      DropdownMenuItem(value: 'all', child: Text('All')),
+                                      DropdownMenuItem(value: 'none', child: Text('No session')),
+                                      DropdownMenuItem(value: 'running', child: Text('Running')),
+                                      DropdownMenuItem(value: 'paused', child: Text('Paused')),
+                                      DropdownMenuItem(value: 'abandoned', child: Text('Abandoned')),
+                                    ],
+                                    onChanged: (val) {
+                                      if (val == null) return;
+                                      setState(() => _statusFilter = val);
+                                    },
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 180,
+                                  child: DropdownButtonFormField<String>(
+                                    value: _difficultyFilter,
+                                    dropdownColor: AppTheme.background,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Difficulty',
+                                      labelStyle: TextStyle(color: AppTheme.textSecondary),
+                                      filled: true,
+                                      fillColor: AppTheme.background,
+                                      border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
+                                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
+                                    ),
+                                    style: const TextStyle(color: AppTheme.textPrimary),
+                                    items: const [
+                                      DropdownMenuItem(value: 'all', child: Text('All')),
+                                      DropdownMenuItem(value: 'S', child: Text('S')),
+                                      DropdownMenuItem(value: 'A', child: Text('A')),
+                                      DropdownMenuItem(value: 'B', child: Text('B')),
+                                      DropdownMenuItem(value: 'C', child: Text('C')),
+                                      DropdownMenuItem(value: 'D', child: Text('D')),
+                                    ],
+                                    onChanged: (val) {
+                                      if (val == null) return;
+                                      setState(() => _difficultyFilter = val);
+                                    },
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 180,
+                                  child: DropdownButtonFormField<String>(
+                                    value: _priorityFilter,
+                                    dropdownColor: AppTheme.background,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Priority',
+                                      labelStyle: TextStyle(color: AppTheme.textSecondary),
+                                      filled: true,
+                                      fillColor: AppTheme.background,
+                                      border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
+                                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
+                                    ),
+                                    style: const TextStyle(color: AppTheme.textPrimary),
+                                    items: const [
+                                      DropdownMenuItem(value: 'all', child: Text('All')),
+                                      DropdownMenuItem(value: 'S', child: Text('S')),
+                                      DropdownMenuItem(value: 'A', child: Text('A')),
+                                      DropdownMenuItem(value: 'B', child: Text('B')),
+                                      DropdownMenuItem(value: 'C', child: Text('C')),
+                                      DropdownMenuItem(value: 'D', child: Text('D')),
+                                    ],
+                                    onChanged: (val) {
+                                      if (val == null) return;
+                                      setState(() => _priorityFilter = val);
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Tab Bar
+              TabBar(
+                controller: _tabController,
+                indicatorColor: AppTheme.primary,
+                labelColor: AppTheme.primary,
+                unselectedLabelColor: AppTheme.textSecondary,
+                tabs: const [
+                  Tab(text: "Active"),
+                  Tab(text: "Completed"),
+                ],
+              ),
+
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildQuestList(activeQuests, isActive: true),
+                    _buildQuestList(completedQuests, isActive: false),
+                  ],
+                ),
+              ),
             ],
           ),
-          
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                // Active List
-                _buildQuestList(activeQuests, isActive: true),
-                // Completed List
-                _buildQuestList(completedQuests, isActive: false),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppTheme.primary,
@@ -379,67 +396,74 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
 
   Widget _buildQuestList(List<Quest> quests, {required bool isActive}) {
     if (quests.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: CyberCard(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(LucideIcons.searchX, size: 36, color: AppTheme.primary),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'No missions found',
-                    style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Try clearing filters or adjusting your search.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
-                  ),
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {
-                            _skillFilterId = null;
-                            _statusFilter = 'all';
-                            _difficultyFilter = 'all';
-                            _priorityFilter = 'all';
-                          });
-                        },
-                        icon: const Icon(LucideIcons.filterX, size: 16),
-                        label: const Text('Clear filters'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.textSecondary,
-                          side: const BorderSide(color: AppTheme.borderColor),
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: (constraints.maxHeight - 32).clamp(0.0, double.infinity)),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: CyberCard(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(LucideIcons.searchX, size: 36, color: AppTheme.primary),
+                        const SizedBox(height: 10),
+                        const Text(
+                          'No missions found',
+                          style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w800),
                         ),
-                      ),
-                      ElevatedButton.icon(
-                        onPressed: () => showMissionDialog(context, ref),
-                        icon: const Icon(LucideIcons.plus, size: 16),
-                        label: const Text('Create mission'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.black,
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Try clearing filters or adjusting your search.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 14),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _skillFilterId = null;
+                                  _statusFilter = 'all';
+                                  _difficultyFilter = 'all';
+                                  _priorityFilter = 'all';
+                                });
+                              },
+                              icon: const Icon(LucideIcons.filterX, size: 16),
+                              label: const Text('Clear filters'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTheme.textSecondary,
+                                side: const BorderSide(color: AppTheme.borderColor),
+                              ),
+                            ),
+                            ElevatedButton.icon(
+                              onPressed: () => showMissionDialog(context, ref),
+                              icon: const Icon(LucideIcons.plus, size: 16),
+                              label: const Text('Create mission'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primary,
+                                foregroundColor: Colors.black,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       );
     }
 
@@ -780,8 +804,9 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
             },
             child: const Text('Delete'),
           ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
+    
   }
 }

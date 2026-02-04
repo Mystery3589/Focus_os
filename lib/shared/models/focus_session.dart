@@ -1,12 +1,15 @@
 
 class FocusSettings {
   final String mode; // "pomodoro", "stopwatch"
+  /// "normal" | "flip"
+  final String clockStyle;
   final PomodoroSettings pomodoro;
   final XpSettings xp;
   final NotificationSettings notifications;
 
   FocusSettings({
     required this.mode,
+    required this.clockStyle,
     required this.pomodoro,
     required this.xp,
     required this.notifications,
@@ -14,12 +17,14 @@ class FocusSettings {
 
   FocusSettings copyWith({
     String? mode,
+    String? clockStyle,
     PomodoroSettings? pomodoro,
     XpSettings? xp,
     NotificationSettings? notifications,
   }) {
     return FocusSettings(
       mode: mode ?? this.mode,
+      clockStyle: clockStyle ?? this.clockStyle,
       pomodoro: pomodoro ?? this.pomodoro,
       xp: xp ?? this.xp,
       notifications: notifications ?? this.notifications,
@@ -29,6 +34,7 @@ class FocusSettings {
   factory FocusSettings.fromJson(Map<String, dynamic> json) {
     return FocusSettings(
       mode: json['mode'] ?? 'pomodoro',
+      clockStyle: json['clockStyle'] ?? 'normal',
       pomodoro: PomodoroSettings.fromJson(json['pomodoro'] ?? {}),
       xp: XpSettings.fromJson(json['xp'] ?? {}),
       notifications: NotificationSettings.fromJson(json['notifications'] ?? {}),
@@ -38,6 +44,7 @@ class FocusSettings {
   Map<String, dynamic> toJson() {
     return {
       'mode': mode,
+      'clockStyle': clockStyle,
       'pomodoro': pomodoro.toJson(),
       'xp': xp.toJson(),
       'notifications': notifications.toJson(),
@@ -48,6 +55,7 @@ class FocusSettings {
   static FocusSettings defaultSettings() {
     return FocusSettings(
       mode: 'pomodoro',
+      clockStyle: 'normal',
       pomodoro: PomodoroSettings(focusMinutes: 25, breakMinutes: 5),
       xp: XpSettings(baseXpPerMinute: 1),
       notifications: NotificationSettings.defaultSettings(),
@@ -61,6 +69,8 @@ class NotificationSettings {
   final int pausedMissionReminderMinutes;
   final bool dueDateReminder;
   final int dueDateReminderHour; // 0-23
+  final bool eventReminder;
+  final int eventReminderHour; // 0-23
 
   const NotificationSettings({
     required this.enabled,
@@ -68,6 +78,8 @@ class NotificationSettings {
     required this.pausedMissionReminderMinutes,
     required this.dueDateReminder,
     required this.dueDateReminderHour,
+    required this.eventReminder,
+    required this.eventReminderHour,
   });
 
   static NotificationSettings defaultSettings() {
@@ -77,6 +89,8 @@ class NotificationSettings {
       pausedMissionReminderMinutes: 30,
       dueDateReminder: true,
       dueDateReminderHour: 9,
+      eventReminder: false,
+      eventReminderHour: 9,
     );
   }
 
@@ -86,6 +100,8 @@ class NotificationSettings {
     int? pausedMissionReminderMinutes,
     bool? dueDateReminder,
     int? dueDateReminderHour,
+    bool? eventReminder,
+    int? eventReminderHour,
   }) {
     return NotificationSettings(
       enabled: enabled ?? this.enabled,
@@ -93,6 +109,8 @@ class NotificationSettings {
       pausedMissionReminderMinutes: pausedMissionReminderMinutes ?? this.pausedMissionReminderMinutes,
       dueDateReminder: dueDateReminder ?? this.dueDateReminder,
       dueDateReminderHour: dueDateReminderHour ?? this.dueDateReminderHour,
+      eventReminder: eventReminder ?? this.eventReminder,
+      eventReminderHour: eventReminderHour ?? this.eventReminderHour,
     );
   }
 
@@ -103,6 +121,8 @@ class NotificationSettings {
       pausedMissionReminderMinutes: json['pausedMissionReminderMinutes'] ?? 30,
       dueDateReminder: json['dueDateReminder'] ?? true,
       dueDateReminderHour: json['dueDateReminderHour'] ?? 9,
+      eventReminder: json['eventReminder'] ?? false,
+      eventReminderHour: json['eventReminderHour'] ?? 9,
     );
   }
 
@@ -113,6 +133,8 @@ class NotificationSettings {
       'pausedMissionReminderMinutes': pausedMissionReminderMinutes,
       'dueDateReminder': dueDateReminder,
       'dueDateReminderHour': dueDateReminderHour,
+      'eventReminder': eventReminder,
+      'eventReminderHour': eventReminderHour,
     };
   }
 }

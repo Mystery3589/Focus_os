@@ -12,6 +12,8 @@ import '../../shared/widgets/cyber_card.dart';
 import '../../shared/widgets/mission_dialog.dart';
 import '../../shared/providers/user_provider.dart';
 import '../../shared/services/local_backup_service.dart';
+import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
 
 class SkillsScreen extends ConsumerWidget {
   const SkillsScreen({super.key});
@@ -31,23 +33,25 @@ class SkillsScreen extends ConsumerWidget {
         ),
         title: const Text('Skills', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
         actions: [
+          const AiInboxBellAction(),
           IconButton(
             icon: const Icon(LucideIcons.plus),
             onPressed: () => _showAddSkillDialog(context, ref),
           ),
         ],
       ),
-      body: userStats.skills.isEmpty
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 520),
-                  child: CyberCard(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
+      body: PageEntrance(
+        child: userStats.skills.isEmpty
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: CyberCard(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
                         const Icon(LucideIcons.target, color: AppTheme.primary, size: 40),
                         const SizedBox(height: 12),
                         const Text(
@@ -73,16 +77,16 @@ class SkillsScreen extends ConsumerWidget {
                             label: const Text('Add Skill'),
                           ),
                         ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: userStats.skills.length,
-              itemBuilder: (context, index) {
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: userStats.skills.length,
+                itemBuilder: (context, index) {
                 final skill = userStats.skills[index];
                 final linkedQuests = userStats.quests
                     .where((q) => q.skillId == skill.id)
@@ -335,8 +339,9 @@ class SkillsScreen extends ConsumerWidget {
                     ),
                   ),
                 );
-              },
-            ),
+                },
+              ),
+      ),
     );
   }
 

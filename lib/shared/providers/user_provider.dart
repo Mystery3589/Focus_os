@@ -13,6 +13,8 @@ import '../models/inventory_item.dart';
 import '../models/focus_session.dart';
 import '../models/skill.dart';
 import '../models/combat.dart';
+import '../models/user_event.dart';
+import '../models/habit.dart';
 import '../services/notification_service.dart';
 import '../services/combat_service.dart';
 import '../services/drive_sync_service.dart';
@@ -32,6 +34,25 @@ class UserNotifier extends StateNotifier<UserStats> {
   Timer? _recoveryTimer;
   static const _uuid = Uuid();
   static final Random _combatRng = Random();
+
+  Future<SharedPreferences?> _prefsBestEffort() async {
+    // On some Android builds, plugins can be briefly unavailable during very early startup.
+    // Instead of crashing, retry a few times.
+    for (var attempt = 0; attempt < 4; attempt++) {
+      try {
+        return await SharedPreferences.getInstance();
+      } catch (_) {
+        // Small backoff: 40ms, 80ms, 160ms, 320ms
+        final delayMs = 40 * (1 << attempt);
+        await Future<void>.delayed(Duration(milliseconds: delayMs));
+      }
+    }
+    return null;
+  }
+
+  int _dayKey(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
+
+  DateTime _dayStart(DateTime d) => DateTime(d.year, d.month, d.day);
 
   static const List<String> _jobCatalog = <String>[
     'Novice',
@@ -87,7 +108,11 @@ class UserNotifier extends StateNotifier<UserStats> {
   }
 
   Future<void> _loadUserStats() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefsBestEffort();
+    if (prefs == null) {
+      _startRecoveryTimer();
+      return;
+    }
     final jsonString = prefs.getString('soloLevelUpUserStats');
     if (jsonString != null) {
       try {
@@ -186,7 +211,8 @@ class UserNotifier extends StateNotifier<UserStats> {
   }
 
   Future<void> _saveUserStats() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefsBestEffort();
+    if (prefs == null) return;
     final payload = jsonEncode(state.toJson());
     await prefs.setString('soloLevelUpUserStats', payload);
 
@@ -285,6 +311,26 @@ class UserNotifier extends StateNotifier<UserStats> {
     ));
   }
 
+  void _syncUserEventReminder(UserEvent event) {
+    final notifications = _notificationSettings;
+
+    // Cancel unless all requirements are met.
+    if (!notifications.enabled || !notifications.eventReminder || !event.remind) {
+      unawaited(NotificationService.instance.cancelEventReminder(event.id));
+      return;
+    }
+
+    final startAt = DateTime.fromMillisecondsSinceEpoch(event.startAtMs);
+    unawaited(NotificationService.instance.scheduleEventReminder(
+      eventId: event.id,
+      title: event.title,
+      startAt: startAt,
+      allDay: event.allDay,
+      hourIfAllDay: notifications.eventReminderHour,
+      minutesBefore: event.remindMinutesBefore,
+    ));
+  }
+
   void _resyncAllNotifications() {
     for (final q in state.quests) {
       _syncQuestDueReminder(q);
@@ -292,6 +338,107 @@ class UserNotifier extends StateNotifier<UserStats> {
     for (final s in state.focus.openSessions) {
       _syncPausedReminderForSession(s);
     }
+    for (final e in state.userEvents) {
+      _syncUserEventReminder(e);
+    }
+  }
+
+  // --- Calendar events ---
+  void addUserEvent(UserEvent event) {
+    final title = event.title.trim();
+    if (title.isEmpty) return;
+
+    final updated = List<UserEvent>.from(state.userEvents);
+    updated.add(event.copyWith(title: title));
+
+    state = state.copyWith(userEvents: updated);
+    _saveUserStats();
+    _syncUserEventReminder(event);
+  }
+
+  void updateUserEvent(UserEvent event) {
+    final idx = state.userEvents.indexWhere((e) => e.id == event.id);
+    if (idx < 0) return;
+
+    final title = event.title.trim();
+    if (title.isEmpty) return;
+
+    final updated = List<UserEvent>.from(state.userEvents);
+    updated[idx] = event.copyWith(title: title);
+    state = state.copyWith(userEvents: updated);
+    _saveUserStats();
+    _syncUserEventReminder(updated[idx]);
+  }
+
+  void deleteUserEvent(String eventId) {
+    final idx = state.userEvents.indexWhere((e) => e.id == eventId);
+    if (idx < 0) return;
+
+    final updated = List<UserEvent>.from(state.userEvents)..removeAt(idx);
+    state = state.copyWith(userEvents: updated);
+    _saveUserStats();
+    unawaited(NotificationService.instance.cancelEventReminder(eventId));
+  }
+
+  // --- Habits ---
+  void addHabit(String title) {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final h = Habit(
+      id: _uuid.v4(),
+      title: trimmed,
+      createdAtMs: now,
+      archived: false,
+      completedDays: const [],
+    );
+
+    state = state.copyWith(habits: [...state.habits, h]);
+    _saveUserStats();
+  }
+
+  void toggleHabitCompletion(String habitId, {DateTime? day}) {
+    final idx = state.habits.indexWhere((h) => h.id == habitId);
+    if (idx < 0) return;
+
+    final d = _dayStart(day ?? DateTime.now());
+    final key = _dayKey(d);
+
+    final habits = List<Habit>.from(state.habits);
+    final h = habits[idx];
+    if (h.archived) return;
+
+    final completed = List<int>.from(h.completedDays);
+    if (completed.contains(key)) {
+      completed.removeWhere((k) => k == key);
+    } else {
+      completed.add(key);
+    }
+    completed.sort();
+    habits[idx] = h.copyWith(completedDays: completed);
+
+    state = state.copyWith(habits: habits);
+    _saveUserStats();
+  }
+
+  void archiveHabit(String habitId, {required bool archived}) {
+    final idx = state.habits.indexWhere((h) => h.id == habitId);
+    if (idx < 0) return;
+
+    final habits = List<Habit>.from(state.habits);
+    habits[idx] = habits[idx].copyWith(archived: archived);
+    state = state.copyWith(habits: habits);
+    _saveUserStats();
+  }
+
+  void deleteHabit(String habitId) {
+    final idx = state.habits.indexWhere((h) => h.id == habitId);
+    if (idx < 0) return;
+
+    final habits = List<Habit>.from(state.habits)..removeAt(idx);
+    state = state.copyWith(habits: habits);
+    _saveUserStats();
   }
 
   Future<void> resetAllData() async {
@@ -481,22 +628,24 @@ class UserNotifier extends StateNotifier<UserStats> {
     }
   }
 
-  Map<String, int> _calculateMissionXpBreakdown({
+  Map<String, int?> _calculateMissionXpBreakdown({
     required int actualMinutes,
     required Quest quest,
   }) {
     final safeMinutes = actualMinutes <= 0 ? 1 : actualMinutes;
-    final expected = max(1, quest.expectedMinutes ?? safeMinutes);
     final base = _baseXpPerMinute(quest.difficulty) * safeMinutes;
-    final delta = expected - safeMinutes;
+    final int? expected = (quest.expectedMinutes != null && quest.expectedMinutes! > 0) ? quest.expectedMinutes : null;
+    final int? delta = expected == null ? null : (expected - safeMinutes);
 
     int bonus = 0;
     int penalty = 0;
 
-    if (delta > 0) {
-      bonus = (base * 0.1).floor();
-    } else if (delta < 0) {
-      penalty = (base * 0.1).floor();
+    if (delta != null) {
+      if (delta > 0) {
+        bonus = (base * 0.1).floor();
+      } else if (delta < 0) {
+        penalty = (base * 0.1).floor();
+      }
     }
 
     final total = (base + bonus - penalty).clamp(0, 1 << 30).toInt();
@@ -1566,15 +1715,15 @@ class UserNotifier extends StateNotifier<UserStats> {
        final isCustomSession = session.questId.startsWith('custom-') || questId.startsWith('custom-');
        const customBaseXpPerMinute = 1;
 
-       final breakdown = quest != null
+       final Map<String, int?> breakdown = quest != null
            ? _calculateMissionXpBreakdown(actualMinutes: minutes, quest: quest)
-           : {
+           : <String, int?>{
                'base': max(1, minutes) * customBaseXpPerMinute,
                'bonus': 0,
                'penalty': 0,
                'total': max(1, minutes) * customBaseXpPerMinute,
-               'expected': 0,
-               'delta': 0,
+               'expected': null,
+               'delta': null,
              };
 
        final log = FocusSessionLogEntry(

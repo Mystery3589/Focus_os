@@ -9,6 +9,8 @@ import '../../shared/models/user_stats.dart';
 import '../../shared/providers/user_provider.dart';
 import '../../shared/services/combat_service.dart';
 import '../../shared/widgets/cyber_card.dart';
+import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/ai_inbox_bell_action.dart';
 
 class CombatScreen extends ConsumerStatefulWidget {
   const CombatScreen({super.key});
@@ -67,6 +69,7 @@ class _CombatScreenState extends ConsumerState<CombatScreen> with SingleTickerPr
         ),
         title: const Text('Combat Arena', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
         actions: [
+          const AiInboxBellAction(),
           Padding(
             padding: const EdgeInsets.only(right: 12.0),
             child: Chip(
@@ -77,11 +80,12 @@ class _CombatScreenState extends ConsumerState<CombatScreen> with SingleTickerPr
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: PageEntrance(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
             CyberCard(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -167,12 +171,24 @@ class _CombatScreenState extends ConsumerState<CombatScreen> with SingleTickerPr
             LayoutBuilder(
               builder: (context, constraints) {
                 final width = constraints.maxWidth;
+                // On narrow screens the tiles become too short to hold the full
+                // enemy card content, causing vertical overflows. Prefer a
+                // single column list-like layout on phones.
                 final crossAxisCount = width >= 900
                     ? 4
                     : width >= 650
                         ? 3
-                        : 2;
-                final childAspectRatio = width >= 650 ? 1.28 : 1.35;
+                        : width >= 520
+                            ? 2
+                            : 1;
+
+                final childAspectRatio = width >= 900
+                    ? 1.28
+                    : width >= 650
+                        ? 1.22
+                        : width >= 520
+                            ? 1.12
+                            : 1.05;
 
                 return GridView.builder(
                   shrinkWrap: true,
@@ -328,7 +344,8 @@ class _CombatScreenState extends ConsumerState<CombatScreen> with SingleTickerPr
                 ],
               ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,7 +12,50 @@ import 'shared/services/quick_actions_service.dart';
 import 'shared/widgets/level_up_modal.dart';
 
 void main() {
-  runApp(const ProviderScope(child: MyApp()));
+  // IMPORTANT: Keep binding initialization in the same Zone as runApp.
+  // Otherwise Flutter prints a "Zone mismatch" warning and subtle bugs can occur.
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // Ensure we always get a stack trace in logs on device.
+    var _printedFullRenderFlexOverflow = false;
+    FlutterError.onError = (FlutterErrorDetails details) {
+      FlutterError.presentError(details);
+      final short = details.exceptionAsString();
+
+      // Extra prints help when logs are truncated.
+      // For RenderFlex overflows, print the *full* details once so we capture
+      // the "relevant error-causing widget" file:line.
+      if (!_printedFullRenderFlexOverflow && short.contains('RenderFlex overflowed')) {
+        _printedFullRenderFlexOverflow = true;
+        // ignore: avoid_print
+        print(details.toString());
+      } else {
+        // ignore: avoid_print
+        print('FlutterError: $short');
+      }
+      if (details.stack != null) {
+        // ignore: avoid_print
+        print(details.stack);
+      }
+    };
+
+    PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+      // ignore: avoid_print
+      print('Uncaught platform error: $error');
+      // ignore: avoid_print
+      print(stack);
+      // Returning true prevents the error from being considered unhandled.
+      return true;
+    };
+
+    runApp(const ProviderScope(child: MyApp()));
+  }, (Object error, StackTrace stack) {
+    // ignore: avoid_print
+    print('Uncaught zoned error: $error');
+    // ignore: avoid_print
+    print(stack);
+  });
 }
 
 class MyApp extends ConsumerStatefulWidget {
