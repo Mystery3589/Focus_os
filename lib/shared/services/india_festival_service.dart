@@ -1,5 +1,3 @@
-import 'dart:collection';
-
 import 'package:geoengine/geoengine.dart';
 
 import 'lunar_calendar_service.dart';
@@ -35,7 +33,7 @@ class IndiaFestivalService {
   final int sunriseBoundaryHour;
 
   // Cache by YYYYMM.
-  final _cache = LinkedHashMap<int, List<FestivalInstance>>();
+  final _cache = <int, List<FestivalInstance>>{};
   static const int _maxEntries = 60;
 
   IndiaFestivalService(this._lunar, {this.sunriseBoundaryHour = 6});

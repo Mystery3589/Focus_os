@@ -10,9 +10,10 @@ class SoundManager {
   bool _isEnabled = true;
 
   // Sound paths
-  static const String levelUpSound = 'sounds/glitch-screen.mp3';
-  static const String buttonClickSound = 'sounds/click.mp3'; // If you have it
-  static const String questCompleteSound = 'sounds/quest-complete.mp3'; // If you have it
+  // Note: assets/sounds/ may be empty on some installs; use assets/audio/ for shipped SFX.
+  static const String levelUpSound = 'audio/glitch-screen.mp3';
+  static const String buttonClickSound = 'audio/tick.mp3';
+  static const String questCompleteSound = 'audio/tick.mp3';
 
   /// Play a sound effect
   Future<void> playSound(String soundPath) async {

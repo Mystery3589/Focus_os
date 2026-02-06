@@ -20,6 +20,31 @@ class NotificationService {
 
   bool _initialized = false;
 
+  String _normalizeTzId(String raw) {
+    final id = raw.trim();
+    if (id.isEmpty) return id;
+
+    // Common legacy / alias IDs (Windows & older tz databases).
+    switch (id) {
+      case 'Asia/Calcutta':
+        return 'Asia/Kolkata';
+      default:
+        return id;
+    }
+  }
+
+  String _extractTimezoneId(dynamic tzInfo) {
+    try {
+      if (tzInfo is String) return tzInfo;
+      // flutter_timezone historically returned String, but keep this best-effort.
+      final dynamic maybeId = (tzInfo as dynamic).identifier;
+      if (maybeId is String) return maybeId;
+    } catch (_) {
+      // ignore
+    }
+    return tzInfo?.toString() ?? '';
+  }
+
   int _idForKey(String key) {
     // Stable positive int.
     return key.hashCode & 0x7fffffff;
@@ -31,7 +56,15 @@ class NotificationService {
     try {
       tz.initializeTimeZones();
       final tzInfo = await FlutterTimezone.getLocalTimezone();
-      tz.setLocalLocation(tz.getLocation(tzInfo.identifier));
+      final rawId = _extractTimezoneId(tzInfo);
+      final id = _normalizeTzId(rawId);
+
+      try {
+        tz.setLocalLocation(tz.getLocation(id));
+      } catch (_) {
+        // Fallback for unknown/unsupported IDs.
+        tz.setLocalLocation(tz.getLocation('UTC'));
+      }
 
       const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
       const init = InitializationSettings(android: androidInit);

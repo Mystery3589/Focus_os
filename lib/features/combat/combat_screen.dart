@@ -24,7 +24,6 @@ class _CombatScreenState extends ConsumerState<CombatScreen> with SingleTickerPr
   String? _boostQuestId;
   late TabController _tabController;
 
-  static const _tabContracts = 0;
   static const _tabBosses = 1;
 
   @override
@@ -419,7 +418,7 @@ class _CombatScreenState extends ConsumerState<CombatScreen> with SingleTickerPr
           )
         else
           DropdownButtonFormField<String?>(
-            value: _boostQuestId,
+            initialValue: _boostQuestId,
             dropdownColor: AppTheme.background,
             decoration: InputDecoration(
               filled: true,

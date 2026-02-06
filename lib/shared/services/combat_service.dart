@@ -82,7 +82,7 @@ class CombatService {
       // Convert targetPower into a reasonable Stats set.
       // We build a baseline and then apply archetype weights + jitter.
       final baseline = max(6, (targetPower / 5.3).round());
-      final jitter = () => 0.85 + rng.nextDouble() * 0.30;
+      double jitter() => 0.85 + rng.nextDouble() * 0.30;
 
       final str = max(1, (baseline * arch.weights[0] * jitter()).round());
       final agi = max(1, (baseline * arch.weights[1] * jitter()).round());
@@ -403,8 +403,9 @@ class CombatService {
       // Scales with tier and risk (lower winChance -> slightly higher chance).
       final t = enemy.tier.toLowerCase();
       double baseEqChance = 0.0;
-      if (t == 'elite') baseEqChance = 0.14;
-      else if (t == 'advanced') baseEqChance = 0.09;
+      if (t == 'elite') {
+        baseEqChance = 0.14;
+      } else if (t == 'advanced') baseEqChance = 0.09;
       else if (t == 'intermediate') baseEqChance = 0.06;
       else baseEqChance = 0.03;
 

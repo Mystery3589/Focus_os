@@ -51,8 +51,11 @@ dependencies:
   flutter_timezone: ^5.0.1
   google_sign_in: ^6.2.2
   googleapis: ^13.2.0
+  googleapis_auth: ^1.6.0
+  http: ^1.2.2
   extension_google_sign_in_as_googleapis_auth: ^2.0.12
   file_picker: ^8.3.7
+  path_provider: ^2.1.5
   quick_actions: ^1.1.0
   table_calendar: ^3.1.2
   geoengine: ^1.0.8
@@ -67,6 +70,21 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  image_path: "icon.png"
+  android: true
+  ios: true
+  web:
+    generate: true
+    image_path: "icon.png"
+  windows:
+    generate: true
+    image_path: "icon.png"
+  macos:
+    generate: true
+    image_path: "icon.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

@@ -9,14 +9,16 @@ class MainActivity : FlutterActivity() {
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		// Prefer the default embedding behavior (it may do more than just plugins depending on Flutter version),
 		// but guard it: some plugins can throw NoClassDefFoundError (a Throwable) during class loading.
+		//
+		// IMPORTANT: Only fall back to manual registration when the default path fails.
+		// Calling both will cause "Attempted to register plugin ... but it was already registered" warnings.
 		try {
 			super.configureFlutterEngine(flutterEngine)
+			return
 		} catch (t: Throwable) {
 			Log.e("MainActivity", "Default plugin registration failed; falling back to safe registrant", t)
 		}
 
-		// Always ensure required plugins are registered. If a plugin is already added,
-		// the safe registrant will catch and ignore the duplicate registration error.
 		AppPluginRegistrant.registerWith(flutterEngine)
 	}
 }

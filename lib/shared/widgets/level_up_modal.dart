@@ -5,13 +5,15 @@ import '../services/sound_manager.dart';
 
 class LevelUpModal extends StatefulWidget {
   final int newLevel;
-  final int statIncrease;
+  final int aiAllocatedPoints;
+  final int userBonusPoints;
   final VoidCallback onDismiss;
 
   const LevelUpModal({
     super.key,
     required this.newLevel,
-    required this.statIncrease,
+    required this.aiAllocatedPoints,
+    required this.userBonusPoints,
     required this.onDismiss,
   });
 
@@ -165,7 +167,7 @@ class _LevelUpModalState extends State<LevelUpModal> with SingleTickerProviderSt
                         child: Column(
                           children: [
                             const Text(
-                              'ALL STATS INCREASED!',
+                              'STAT POINTS AWARDED',
                               style: TextStyle(
                                 color: AppTheme.textSecondary,
                                 fontSize: 12,
@@ -174,13 +176,24 @@ class _LevelUpModalState extends State<LevelUpModal> with SingleTickerProviderSt
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              '+${widget.statIncrease}',
+                              'AI allocated: +${widget.aiAllocatedPoints}',
                               style: const TextStyle(
                                 color: AppTheme.primary,
-                                fontSize: 24,
+                                fontSize: 18,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
+                            if (widget.userBonusPoints > 0) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                'You earned: +${widget.userBonusPoints} stat point',
+                                style: const TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       )

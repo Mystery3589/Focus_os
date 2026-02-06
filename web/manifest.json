@@ -1,11 +1,11 @@
 {
-    "name": "focus_flutter",
-    "short_name": "focus_flutter",
+    "name": "Disciplo",
+    "short_name": "Disciplo",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Disciplo",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

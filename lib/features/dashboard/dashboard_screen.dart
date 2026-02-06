@@ -12,6 +12,7 @@ import '../../shared/widgets/stat_display.dart';
 import '../../shared/widgets/cyber_button.dart';
 import '../../shared/widgets/page_container.dart';
 import '../../shared/models/user_stats.dart';
+import '../../shared/widgets/cyber_toast_banner.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -25,6 +26,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
   bool _didShowAiMessage = false;
   ProviderSubscription<UserStats>? _aiMessageSubscription;
   late final AnimationController _aiInboxPulseController;
+  int _aiBannerNonce = 0;
 
   bool get _isTestEnv {
     // Avoid importing flutter_test into lib/ code.
@@ -64,18 +66,44 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
 
+        final int nonce = ++_aiBannerNonce;
+
         final messenger = ScaffoldMessenger.of(context);
-        messenger.hideCurrentSnackBar();
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(msg),
-            action: SnackBarAction(
-              label: 'Profile',
-              onPressed: () => context.go('/settings/profile'),
+
+        messenger.clearMaterialBanners();
+        messenger.showMaterialBanner(
+          MaterialBanner(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            padding: EdgeInsets.zero,
+            content: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: CyberToastBanner(
+                title: 'AI Mentor',
+                message: msg,
+                onPrimary: () {
+                  messenger.hideCurrentMaterialBanner();
+                  context.go('/ai-inbox');
+                },
+                primaryLabel: 'Inbox',
+                onSecondary: () {
+                  messenger.hideCurrentMaterialBanner();
+                  context.go('/settings/profile');
+                },
+                secondaryLabel: 'Profile',
+                onDismiss: () => messenger.hideCurrentMaterialBanner(),
+              ),
             ),
-            duration: const Duration(seconds: 6),
+            actions: const [SizedBox.shrink()],
           ),
         );
+
+        // Auto-dismiss after a bit (MaterialBanner doesn't have a duration).
+        Future.delayed(const Duration(seconds: 7), () {
+          if (!mounted) return;
+          if (nonce != _aiBannerNonce) return;
+          ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+        });
 
         // Clear so it won't show again on rebuilds/restarts.
         ref.read(userProvider.notifier).clearPendingAiMessage();
@@ -335,7 +363,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
                           variant: CyberButtonVariant.outline,
                           fullWidth: true,
                           onPressed: () {
-                            // TODO: wire to allocation page when available
+                            context.push('/allocate-stats');
                           },
                         ),
                       ],
@@ -367,7 +395,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
                               text: "Allocate",
                               variant: CyberButtonVariant.outline,
                               onPressed: () {
-                                // TODO: wire to allocation page when available
+                                context.push('/allocate-stats');
                               },
                             ),
                           ],
@@ -434,7 +462,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
             )
           else
-            ...recent.map((m) => _buildAiInboxRow(m)).toList(),
+            ...recent.map((m) => _buildAiInboxRow(m)),
         ],
       ),
     );
@@ -524,133 +552,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
     );
   }
 
-  Future<void> _openAiInboxSheet(UserStats stats) async {
-    if (_isTestEnv) return;
-
-    // Always read latest when opening.
-    final current = ref.read(userProvider);
-    final inbox = current.aiInbox;
-    final unreadCount = inbox.where((m) => !m.read).length;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return SafeArea(
-          child: Container(
-            margin: const EdgeInsets.all(12),
-            child: CyberCard(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(LucideIcons.bot, color: AppTheme.primary, size: 18),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          'AI INBOX',
-                          style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-                        ),
-                      ),
-                      if (unreadCount > 0)
-                        TextButton(
-                          onPressed: () => ref.read(userProvider.notifier).markAllAiInboxRead(),
-                          child: const Text('Mark all read'),
-                        ),
-                      TextButton(
-                        onPressed: () => ref.read(userProvider.notifier).clearAiInbox(),
-                        child: const Text('Clear'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  if (inbox.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 18),
-                      child: Text(
-                        'No messages yet.',
-                        style: TextStyle(color: AppTheme.textSecondary),
-                      ),
-                    )
-                  else
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight: MediaQuery.of(context).size.height * 0.7,
-                      ),
-                      child: Consumer(
-                        builder: (context, ref, _) {
-                          final live = ref.watch(userProvider).aiInbox;
-                          return ListView.separated(
-                            shrinkWrap: true,
-                            itemCount: live.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 8),
-                            itemBuilder: (context, i) {
-                              final msg = live[i];
-                              return GestureDetector(
-                                onTap: () => ref.read(userProvider.notifier).markAiInboxMessageRead(msg.id),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.background.withOpacity(msg.read ? 0.25 : 0.45),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: AppTheme.borderColor.withOpacity(0.75)),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        msg.text,
-                                        style: TextStyle(
-                                          color: msg.read ? AppTheme.textSecondary : AppTheme.textPrimary,
-                                          fontSize: 13,
-                                          height: 1.25,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Row(
-                                        children: [
-                                          Text(
-                                            _timeAgo(msg.createdAtMs),
-                                            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                                          ),
-                                          const Spacer(),
-                                          if (!msg.read)
-                                            const Text(
-                                              'UNREAD',
-                                              style: TextStyle(color: AppTheme.primary, fontSize: 11, letterSpacing: 1.1),
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Close'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   String _timeAgo(int createdAtMs) {
     if (createdAtMs <= 0) return 'Just now';
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -664,58 +565,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
     if (hours < 48) return '${hours}h ago';
     final days = (hours / 24).floor();
     return '${days}d ago';
-  }
-
-  Widget _buildNotificationBell({
-    required int unreadCount,
-    required VoidCallback onPressed,
-  }) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onPressed,
-            borderRadius: BorderRadius.circular(999),
-            child: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppTheme.background.withOpacity(0.65),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: AppTheme.borderColor.withOpacity(0.8)),
-              ),
-              child: const Icon(
-                LucideIcons.bell,
-                size: 18,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-          ),
-        ),
-        if (unreadCount > 0)
-          Positioned(
-            top: -2,
-            right: -2,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppTheme.primary,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: Colors.black.withOpacity(0.35)),
-              ),
-              child: Text(
-                unreadCount > 99 ? '99+' : '$unreadCount',
-                style: const TextStyle(
-                  color: Colors.black,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
   }
 
   Widget _buildInfoLine(String label, String value) {

@@ -27,6 +27,9 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
   bool _autoUpload = false;
   DriveSyncStatus? _status;
 
+  bool get _driveSupported => DriveSyncService.instance.isPlatformSupported;
+  bool get _desktopConfigMissing => DriveSyncService.instance.isDesktopConfigMissing;
+
   @override
   void initState() {
     super.initState();
@@ -34,21 +37,25 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _loading = true);
-    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _loading = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
-    // Best-effort silent sign-in so returning users feel "synced".
-    await DriveSyncService.instance.signInSilently();
+      // Best-effort silent sign-in so returning users feel "synced".
+      await DriveSyncService.instance.signInSilently();
 
-    final signedIn = await DriveSyncService.instance.isSignedIn();
-    final status = await DriveSyncService.instance.getStatus();
+      final signedIn = await DriveSyncService.instance.isSignedIn();
+      final status = await DriveSyncService.instance.getStatus();
 
-    setState(() {
-      _autoUpload = prefs.getBool(DriveSyncService.prefAutoUpload) ?? false;
-      _signedIn = signedIn;
-      _status = status;
-      _loading = false;
-    });
+      if (!mounted) return;
+      setState(() {
+        _autoUpload = prefs.getBool(DriveSyncService.prefAutoUpload) ?? false;
+        _signedIn = signedIn;
+        _status = status;
+      });
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   String _fmtMs(int? ms) {
@@ -107,6 +114,16 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                     'Sync uses a hidden AppData folder in your Google Drive. We store a single “latest” JSON plus an optional daily snapshot.',
                     style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, height: 1.3),
                   ),
+                  if (_desktopConfigMissing) ...[
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Windows Google Drive sign-in needs a Google OAuth “Desktop app” client.\n'
+                      'Run with:\n'
+                      '  --dart-define=GOOGLE_OAUTH_DESKTOP_CLIENT_ID=...\n'
+                      '  --dart-define=GOOGLE_OAUTH_DESKTOP_CLIENT_SECRET=...\n',
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, height: 1.3),
+                    ),
+                  ],
                   const SizedBox(height: 14),
                   Row(
                     children: [
@@ -151,7 +168,18 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                       ? null
                       : () async {
                           setState(() => _loading = true);
-                          await DriveSyncService.instance.signIn();
+                          final ok = await DriveSyncService.instance.signIn();
+                          if (!mounted) return;
+                          if (!ok) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Sign-in cancelled/failed. On Windows, you must provide Desktop OAuth client ID/secret via --dart-define.',
+                                ),
+                                duration: Duration(seconds: 8),
+                              ),
+                            );
+                          }
                           await _refresh();
                         },
                   icon: const Icon(LucideIcons.logIn, size: 16),

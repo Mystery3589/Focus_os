@@ -28,6 +28,10 @@ class Quest {
   final int? createdAt;
   final int? completedAt;
 
+  /// Optional parent mission id. When set, this quest is a sub-mission of
+  /// [parentQuestId].
+  final String? parentQuestId;
+
   Quest({
     required this.id,
     required this.title,
@@ -53,6 +57,7 @@ class Quest {
     this.goldReward,
     this.createdAt,
     this.completedAt,
+    this.parentQuestId,
   });
 
   factory Quest.fromJson(Map<String, dynamic> json) {
@@ -83,6 +88,7 @@ class Quest {
       goldReward: json['goldReward'],
       createdAt: json['createdAt'],
       completedAt: json['completedAt'],
+      parentQuestId: json['parentQuestId'],
     );
   }
 
@@ -112,6 +118,7 @@ class Quest {
       'goldReward': goldReward,
       'createdAt': createdAt,
       'completedAt': completedAt,
+      'parentQuestId': parentQuestId,
     };
   }
 
@@ -140,6 +147,7 @@ class Quest {
     int? goldReward,
     int? createdAt,
     int? completedAt,
+    String? parentQuestId,
   }) {
     return Quest(
       id: id ?? this.id,
@@ -166,6 +174,7 @@ class Quest {
       goldReward: goldReward ?? this.goldReward,
       createdAt: createdAt ?? this.createdAt,
       completedAt: completedAt ?? this.completedAt,
+      parentQuestId: parentQuestId ?? this.parentQuestId,
     );
   }
 }

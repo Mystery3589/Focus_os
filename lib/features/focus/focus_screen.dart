@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
@@ -17,6 +18,8 @@ import '../../shared/models/user_stats.dart';
 import '../../shared/widgets/page_container.dart';
 import '../../shared/widgets/page_entrance.dart';
 import '../../shared/widgets/ai_inbox_bell_action.dart';
+import '../../shared/services/white_noise_library_service.dart';
+import '../../shared/services/flip_clock_sound_service.dart';
 
 class FocusScreen extends ConsumerStatefulWidget {
   final String? initialMissionId;
@@ -41,11 +44,25 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
   final TextEditingController _customSessionController = TextEditingController();
   final TextEditingController _pomoFocusController = TextEditingController();
   final TextEditingController _pomoBreakController = TextEditingController();
+  final TextEditingController _breakMinIntervalController = TextEditingController();
+  final TextEditingController _breakMaxIntervalController = TextEditingController();
+  final TextEditingController _breakMinutesController = TextEditingController();
+  final TextEditingController _breakSkipBonusXpController = TextEditingController();
+  ProviderSubscription<WhiteNoiseSettings>? _whiteNoiseSub;
 
   @override
   void initState() {
     super.initState();
     _startTimer();
+
+    // Keep the local UI state in sync with settings changes.
+    // (Playback is controlled globally by the app shell in main.dart.)
+    _whiteNoiseSub = ref.listenManual<WhiteNoiseSettings>(
+      userProvider.select((s) => s.focus.settings.whiteNoise),
+      (previous, next) {
+        // no-op: we just want rebuilds when settings change
+      },
+    );
     
     // Auto-select mission if provided or active
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -110,9 +127,15 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _whiteNoiseSub?.close();
+    _whiteNoiseSub = null;
     _customSessionController.dispose();
     _pomoFocusController.dispose();
     _pomoBreakController.dispose();
+    _breakMinIntervalController.dispose();
+    _breakMaxIntervalController.dispose();
+    _breakMinutesController.dispose();
+    _breakSkipBonusXpController.dispose();
     super.dispose();
   }
 
@@ -168,6 +191,80 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
     return total > 0 ? total : 0;
   }
 
+  Future<void> _maybeOfferBreak(
+    WidgetRef ref,
+    FocusOpenSession session, {
+    bool force = false,
+    bool issued = false,
+  }) async {
+    final offer = ref.read(userProvider.notifier).offerBreakForSession(
+          session.id,
+          force: force,
+          issued: issued,
+        );
+    if (offer == null) return;
+    if (!mounted) return;
+
+    final breakMinutes = offer.breakMinutes;
+    final bonusXp = offer.skipBonusXp;
+
+    final take = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppTheme.background,
+          title: const Text(
+            'Break time?',
+            style: TextStyle(color: AppTheme.textPrimary),
+          ),
+          content: Text(
+            bonusXp > 0
+                ? 'Take a $breakMinutes minute break, or skip for +$bonusXp XP.'
+                : 'Take a $breakMinutes minute break?',
+            style: const TextStyle(color: AppTheme.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(null),
+              child: const Text('Later'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(bonusXp > 0 ? 'Skip (+$bonusXp XP)' : 'Skip'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('Take break'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (take == null) return;
+    final notifier = ref.read(userProvider.notifier);
+    if (take) {
+      notifier.recordBreakTaken(session.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Break started ($breakMinutes min).')),
+        );
+      }
+    } else {
+      notifier.recordBreakSkipped(session.id);
+      if (mounted && bonusXp > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Break skipped: +$bonusXp XP')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final userStats = ref.watch(userProvider);
@@ -216,6 +313,24 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
       final breakText = settings.pomodoro.breakMinutes.toString();
       if (_pomoBreakController.text != breakText) {
         _pomoBreakController.text = breakText;
+      }
+
+      final b = settings.breaks;
+      final minI = b.minIntervalMinutes.toString();
+      if (_breakMinIntervalController.text != minI) {
+        _breakMinIntervalController.text = minI;
+      }
+      final maxI = b.maxIntervalMinutes.toString();
+      if (_breakMaxIntervalController.text != maxI) {
+        _breakMaxIntervalController.text = maxI;
+      }
+      final breakM = b.breakMinutes.toString();
+      if (_breakMinutesController.text != breakM) {
+        _breakMinutesController.text = breakM;
+      }
+      final bonus = b.skipBonusXp.toString();
+      if (_breakSkipBonusXpController.text != bonus) {
+        _breakSkipBonusXpController.text = bonus;
       }
     }
 
@@ -372,6 +487,71 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                               ),
                               textAlign: TextAlign.center,
                             ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              alignment: WrapAlignment.center,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Normal'),
+                                  selected: settings.clockStyle == 'normal',
+                                  onSelected: (_) {
+                                    if (settings.clockStyle == 'normal') return;
+                                    ref.read(userProvider.notifier).updateFocusSettings(
+                                          focusState.settings.copyWith(clockStyle: 'normal'),
+                                        );
+                                  },
+                                  selectedColor: AppTheme.primary,
+                                  labelStyle: TextStyle(
+                                    color: settings.clockStyle == 'normal' ? Colors.black : AppTheme.textSecondary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                ChoiceChip(
+                                  label: const Text('Flip'),
+                                  selected: settings.clockStyle == 'flip',
+                                  onSelected: (_) {
+                                    if (settings.clockStyle == 'flip') return;
+                                    ref.read(userProvider.notifier).updateFocusSettings(
+                                          focusState.settings.copyWith(clockStyle: 'flip'),
+                                        );
+                                  },
+                                  selectedColor: AppTheme.primary,
+                                  labelStyle: TextStyle(
+                                    color: settings.clockStyle == 'flip' ? Colors.black : AppTheme.textSecondary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              ],
+                            ),
+                            if (settings.clockStyle == 'flip') ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(LucideIcons.volume2, size: 16, color: AppTheme.textSecondary),
+                                  const SizedBox(width: 8),
+                                  const Text(
+                                    'Flip tick sound',
+                                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Switch.adaptive(
+                                    value: settings.flipClockSoundEnabled,
+                                    onChanged: (v) {
+                                      ref.read(userProvider.notifier).updateFocusSettings(
+                                            focusState.settings.copyWith(flipClockSoundEnabled: v),
+                                          );
+                                    },
+                                    activeColor: AppTheme.primary,
+                                  ),
+                                ],
+                              ),
+                            ],
                             const SizedBox(height: 10),
                             Builder(
                               builder: (context) {
@@ -381,6 +561,7 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                                     hh: p.hh,
                                     mm: p.mm,
                                     ss: p.ss,
+                                    soundEnabled: settings.flipClockSoundEnabled,
                                   );
                                 }
 
@@ -410,6 +591,12 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                     const SizedBox(height: 16),
 
                     _buildControls(ref, selectedSession, isRunning, isPaused, isAbandoned),
+
+                    const SizedBox(height: 14),
+                    _buildWhiteNoiseControls(ref, settings),
+
+                    const SizedBox(height: 14),
+                    _buildBreakControls(ref, settings),
                   ],
                 ),
               ),
@@ -443,6 +630,351 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
             fontSize: 12,
           ),
         ),
+      ),
+    );
+  }
+
+  String _basename(String path) {
+    final p = path.replaceAll('\\', '/');
+    final idx = p.lastIndexOf('/');
+    if (idx == -1) return p;
+    return p.substring(idx + 1);
+  }
+
+  Widget _buildWhiteNoiseControls(WidgetRef ref, FocusSettings settings) {
+    final wn = settings.whiteNoise;
+    final enabled = wn.enabled && wn.preset != 'off';
+    String whiteNoiseNowPlayingLabel(WhiteNoiseSettings w) {
+      final p = w.preset;
+      if (p == 'rain') return 'Now playing: Rain';
+      if (p == 'thunder' || p == 'thunderstorm') return 'Now playing: Thunderstorm';
+      if (p == 'custom') {
+        final name = (w.customPath == null || w.customPath!.trim().isEmpty) ? 'Custom (no file)' : _basename(w.customPath!);
+        return 'Now playing: Custom — $name';
+      }
+      return 'Now playing: $p';
+    }
+    final thunderSelected = wn.preset == 'thunder' || wn.preset == 'thunderstorm';
+
+    void setWhiteNoise(WhiteNoiseSettings next) {
+      final updated = settings.copyWith(whiteNoise: next);
+      ref.read(userProvider.notifier).updateFocusSettings(updated);
+    }
+
+    Future<void> pickCustom() async {
+      try {
+        final res = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'],
+          withData: false,
+        );
+        final path = res?.files.single.path;
+        if (path == null || path.trim().isEmpty) return;
+        setWhiteNoise(
+          wn.copyWith(
+            enabled: true,
+            preset: 'custom',
+            customPath: path,
+          ),
+        );
+      } catch (_) {
+        // Non-fatal; picking audio is optional.
+      }
+    }
+
+    Future<void> saveCustomCopy() async {
+      final path = wn.customPath;
+      if (path == null || path.trim().isEmpty) return;
+      try {
+        final saved = await WhiteNoiseLibraryService.instance.saveCustomCopy(path);
+        if (saved == null || saved.trim().isEmpty) return;
+        setWhiteNoise(wn.copyWith(customPath: saved));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Custom white noise saved to app storage.')),
+        );
+      } catch (_) {
+        // Non-fatal.
+      }
+    }
+
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.background.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(LucideIcons.cloudRain, size: 16, color: AppTheme.primary),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'White noise',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              IconButton(
+                icon: Icon(enabled ? LucideIcons.pauseCircle : LucideIcons.playCircle, color: AppTheme.primary),
+                tooltip: enabled ? 'Pause white noise' : 'Play white noise',
+                onPressed: () {
+                  // Make play/pause persistent so it keeps working across pages.
+                  setWhiteNoise(
+                    wn.copyWith(
+                      enabled: !enabled,
+                      preset: !enabled ? (wn.preset == 'off' ? 'rain' : wn.preset) : wn.preset,
+                    ),
+                  );
+                },
+              ),
+              Switch(
+                value: enabled,
+                onChanged: (v) {
+                  setWhiteNoise(
+                    wn.copyWith(
+                      enabled: v,
+                      preset: v ? (wn.preset == 'off' ? 'rain' : wn.preset) : wn.preset,
+                    ),
+                  );
+                },
+                activeThumbColor: AppTheme.primary,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Rain / Thunderstorm are generated offline. Custom lets you pick your own file.',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('Rain'),
+                selected: wn.preset == 'rain',
+                onSelected: enabled ? (_) => setWhiteNoise(wn.copyWith(preset: 'rain')) : null,
+                selectedColor: AppTheme.primary,
+                labelStyle: TextStyle(color: wn.preset == 'rain' ? Colors.black : AppTheme.textSecondary, fontWeight: FontWeight.w600),
+                visualDensity: VisualDensity.compact,
+              ),
+              ChoiceChip(
+                label: const Text('Thunderstorm'),
+                selected: thunderSelected,
+                onSelected: enabled ? (_) => setWhiteNoise(wn.copyWith(preset: 'thunderstorm')) : null,
+                selectedColor: AppTheme.primary,
+                labelStyle: TextStyle(color: thunderSelected ? Colors.black : AppTheme.textSecondary, fontWeight: FontWeight.w600),
+                visualDensity: VisualDensity.compact,
+              ),
+              ChoiceChip(
+                label: const Text('Custom'),
+                selected: wn.preset == 'custom',
+                onSelected: enabled
+                    ? (_) {
+                        setWhiteNoise(wn.copyWith(preset: 'custom'));
+                        if (wn.customPath == null || wn.customPath!.trim().isEmpty) {
+                          pickCustom();
+                        }
+                      }
+                    : null,
+                selectedColor: AppTheme.primary,
+                labelStyle: TextStyle(color: wn.preset == 'custom' ? Colors.black : AppTheme.textSecondary, fontWeight: FontWeight.w600),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          if (enabled) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(LucideIcons.volume2, size: 16, color: AppTheme.textSecondary),
+                const SizedBox(width: 8),
+                const Text('Volume', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Slider(
+                    value: wn.volume.clamp(0.0, 1.0),
+                    onChanged: (v) => setWhiteNoise(wn.copyWith(volume: v)),
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: 20,
+                    activeColor: AppTheme.primary,
+                    inactiveColor: AppTheme.borderColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Now playing indicator
+            Row(
+              children: [
+                const Icon(LucideIcons.playCircle, size: 14, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    whiteNoiseNowPlayingLabel(wn),
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (enabled && wn.preset == 'custom') ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    wn.customPath == null || wn.customPath!.trim().isEmpty
+                        ? 'No file selected'
+                        : _basename(wn.customPath!),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                TextButton.icon(
+                  onPressed: enabled ? pickCustom : null,
+                  icon: const Icon(LucideIcons.folderOpen, size: 16),
+                  label: const Text('Pick'),
+                ),
+                const SizedBox(width: 6),
+                TextButton.icon(
+                  onPressed: enabled ? saveCustomCopy : null,
+                  icon: const Icon(LucideIcons.save, size: 16),
+                  label: const Text('Save'),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBreakControls(WidgetRef ref, FocusSettings settings) {
+    final b = settings.breaks;
+
+    void setBreaks(BreakSettings next) {
+      ref.read(userProvider.notifier).updateFocusSettings(settings.copyWith(breaks: next));
+    }
+
+    int? parse(String v) => int.tryParse(v.trim());
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.background.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(LucideIcons.coffee, size: 16, color: AppTheme.primary),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Breaks',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Switch(
+                value: b.enabled,
+                onChanged: (v) => setBreaks(b.copyWith(enabled: v)),
+                activeThumbColor: AppTheme.primary,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Breaks may be offered randomly when you pause (after long intervals).',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Min interval', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 90,
+                child: _buildNumInput(
+                  controller: _breakMinIntervalController,
+                  onSubmitted: (v) {
+                    final n = parse(v);
+                    if (n == null) return;
+                    setBreaks(b.copyWith(minIntervalMinutes: n));
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text('Max interval', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 90,
+                child: _buildNumInput(
+                  controller: _breakMaxIntervalController,
+                  onSubmitted: (v) {
+                    final n = parse(v);
+                    if (n == null) return;
+                    setBreaks(b.copyWith(maxIntervalMinutes: n));
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Break minutes', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 90,
+                child: _buildNumInput(
+                  controller: _breakMinutesController,
+                  onSubmitted: (v) {
+                    final n = parse(v);
+                    if (n == null) return;
+                    setBreaks(b.copyWith(breakMinutes: n));
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text('Skip bonus XP', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 90,
+                child: _buildNumInput(
+                  controller: _breakSkipBonusXpController,
+                  onSubmitted: (v) {
+                    final n = parse(v);
+                    if (n == null) return;
+                    setBreaks(b.copyWith(skipBonusXp: n));
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -596,8 +1128,10 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                   text: "Pause",
                   variant: CyberButtonVariant.outline,
                   icon: LucideIcons.pause,
-                  onPressed: () {
-                     ref.read(userProvider.notifier).pauseFocus();
+                  onPressed: () async {
+                    if (session == null) return;
+                    ref.read(userProvider.notifier).pauseFocus();
+                    await _maybeOfferBreak(ref, session);
                   },
                 ),
               ),
@@ -615,9 +1149,13 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                        final questId = session!.questId;
                        ref.read(userProvider.notifier).completeMission(questId, elapsed);
                        
-                       // After complete, maybe go back or show dialog?
-                       // For now, reset selection or go back
-                       if (mounted) context.pop(); 
+                       // After complete, go back when possible; otherwise fall back to home.
+                       if (!mounted) return;
+                       if (context.canPop()) {
+                         context.pop();
+                       } else {
+                         context.go('/');
+                       }
                     },
                   ),
                 ),
@@ -669,67 +1207,182 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
     }
 
     if (isPaused) {
-       return Row(
+       return Column(
          children: [
-           Expanded(
-             child: CyberButton(
-               text: "Continue",
-               variant: CyberButtonVariant.primary,
-               icon: LucideIcons.play,
-               onPressed: () {
-                 ref.read(userProvider.notifier).startFocus(_selectedMissionId);
-               },
-             ),
+           Row(
+             children: [
+               Expanded(
+                 child: CyberButton(
+                   text: "Continue",
+                   variant: CyberButtonVariant.primary,
+                   icon: LucideIcons.play,
+                   onPressed: () {
+                     ref.read(userProvider.notifier).startFocus(_selectedMissionId);
+                   },
+                 ),
+               ),
+               const SizedBox(width: 16),
+               Expanded(
+                 child: CyberButton(
+                   text: _selectedMissionId.startsWith("custom-") ? "End" : "Abandon",
+                   variant: CyberButtonVariant.outline,
+                   icon: _selectedMissionId.startsWith("custom-") ? LucideIcons.square : LucideIcons.xCircle,
+                   onPressed: () {
+                     if (session != null) {
+                       if (_selectedMissionId.startsWith("custom-")) {
+                         final elapsed = _calculateElapsed(session);
+                         ref.read(userProvider.notifier).completeMission(session.id, elapsed);
+                       } else {
+                         ref.read(userProvider.notifier).abandonMission(session.id);
+                       }
+                     }
+                     setState(() {
+                       _selectedMissionId = "";
+                       _customSessionController.clear();
+                     });
+                   },
+                 ),
+               ),
+             ],
            ),
-           const SizedBox(width: 16),
-           Expanded(
-             child: CyberButton(
-               text: _selectedMissionId.startsWith("custom-") ? "End" : "Abandon",
-               variant: CyberButtonVariant.outline,
-               icon: _selectedMissionId.startsWith("custom-") ? LucideIcons.square : LucideIcons.xCircle,
-               onPressed: () {
-                 if (session != null) {
-                   if (_selectedMissionId.startsWith("custom-")) {
-                     final elapsed = _calculateElapsed(session);
-                     ref.read(userProvider.notifier).completeMission(session.id, elapsed);
-                   } else {
-                     ref.read(userProvider.notifier).abandonMission(session.id);
-                   }
-                 }
-                 setState(() {
-                   _selectedMissionId = "";
-                   _customSessionController.clear();
-                 });
-               },
-             ),
+           const SizedBox(height: 12),
+           CyberButton(
+             text: "Issue break",
+             fullWidth: true,
+             variant: CyberButtonVariant.outline,
+             icon: LucideIcons.coffee,
+             onPressed: session == null
+                 ? null
+                 : () async {
+                     await _maybeOfferBreak(ref, session, force: true, issued: true);
+                   },
            ),
          ],
        );
     }
     
     // Not running, not paused -> Start
-    return CyberButton(
-      text: "Start Focus",
-      fullWidth: true,
-      icon: LucideIcons.play,
-      onPressed: () {
-         if (_selectedMissionId.isNotEmpty) {
-           ref.read(userProvider.notifier).startFocus(_selectedMissionId);
-         } else if (_customSessionController.text.isNotEmpty) {
-           // Start custom session
-           // We need to generate an ID or let provider handle it?
-           // Provider `startFocus` checks if id exists in missions. if not, treats as custom? 
-           // Looking at `user_provider.dart` would confirm.
-           // Assuming `startFocus` takes (id, heading).
-           // If I pass a new UUID, provider might look for quest. 
-           // Let's assume provider handles "if not quest, create custom".
-           final customId = "custom-${const Uuid().v4()}";
-           ref.read(userProvider.notifier).startFocus(customId, heading: _customSessionController.text);
-           setState(() {
-             _selectedMissionId = customId;
-           });
-         }
-      },
+    final isQuestSelected = _selectedMissionId.isNotEmpty && !_selectedMissionId.startsWith('custom-');
+
+    Future<bool> confirmCompleteWithoutStarting() async {
+      if (!isQuestSelected) return false;
+
+      Quest? quest;
+      try {
+        quest = ref.read(userProvider).quests.firstWhere((q) => q.id == _selectedMissionId);
+      } catch (_) {}
+      if (quest == null) return false;
+
+      final res = await showDialog<bool>(
+        context: context,
+        barrierDismissible: true,
+        builder: (context) {
+          return AlertDialog(
+            backgroundColor: AppTheme.cardBg,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: const BorderSide(color: AppTheme.borderColor),
+            ),
+            title: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Complete mission? ',
+                    style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  icon: const Icon(LucideIcons.x, color: AppTheme.textSecondary),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            content: Text(
+              'This will mark "${quest!.title}" as completed without starting a focus session.\n\nRewards will still be granted and it will be tracked in your history.',
+              style: const TextStyle(color: AppTheme.textPrimary),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.of(context).pop(true),
+                icon: const Icon(LucideIcons.check, size: 16),
+                label: const Text('Complete'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.black,
+                ),
+              ),
+            ],
+          );
+        },
+      );
+      return res ?? false;
+    }
+
+    void startSelectedOrCustom() {
+      if (_selectedMissionId.isNotEmpty) {
+        ref.read(userProvider.notifier).startFocus(_selectedMissionId);
+        return;
+      }
+      if (_customSessionController.text.isNotEmpty) {
+        final customId = "custom-${const Uuid().v4()}";
+        ref.read(userProvider.notifier).startFocus(customId, heading: _customSessionController.text);
+        setState(() {
+          _selectedMissionId = customId;
+        });
+      }
+    }
+
+    if (!isQuestSelected) {
+      return CyberButton(
+        text: "Start Focus",
+        fullWidth: true,
+        icon: LucideIcons.play,
+        onPressed: startSelectedOrCustom,
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          child: CyberButton(
+            text: "Start Focus",
+            variant: CyberButtonVariant.primary,
+            icon: LucideIcons.play,
+            onPressed: startSelectedOrCustom,
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: CyberButton(
+            text: "Complete",
+            variant: CyberButtonVariant.outline,
+            icon: LucideIcons.check,
+            onPressed: () async {
+              final ok = await confirmCompleteWithoutStarting();
+              if (!ok) return;
+
+              final success = ref.read(userProvider.notifier).completeQuestWithoutStarting(_selectedMissionId);
+              if (!success) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Can\'t complete while this mission is running/paused.')),
+                );
+                return;
+              }
+
+              setState(() {
+                _selectedMissionId = "";
+                _customSessionController.clear();
+              });
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -852,16 +1505,34 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
   }
 }
 
-class _FlipClock extends StatelessWidget {
+class _FlipClock extends StatefulWidget {
   final String hh;
   final String mm;
   final String ss;
+  final bool soundEnabled;
 
   const _FlipClock({
     required this.hh,
     required this.mm,
     required this.ss,
+    required this.soundEnabled,
   });
+
+  @override
+  State<_FlipClock> createState() => _FlipClockState();
+}
+
+class _FlipClockState extends State<_FlipClock> {
+  @override
+  void didUpdateWidget(covariant _FlipClock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Only tick when the displayed seconds actually change.
+    if (!widget.soundEnabled) return;
+    if (widget.ss == oldWidget.ss) return;
+
+    FlipClockSoundService.instance.tick();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -877,15 +1548,15 @@ class _FlipClock extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            _FlipNumber(value: hh, digitWidth: digitW, digitHeight: digitH, gap: gap),
+            _FlipNumber(value: widget.hh, digitWidth: digitW, digitHeight: digitH, gap: gap),
             SizedBox(width: gap),
             _FlipColon(height: digitH),
             SizedBox(width: gap),
-            _FlipNumber(value: mm, digitWidth: digitW, digitHeight: digitH, gap: gap),
+            _FlipNumber(value: widget.mm, digitWidth: digitW, digitHeight: digitH, gap: gap),
             SizedBox(width: gap),
             _FlipColon(height: digitH),
             SizedBox(width: gap),
-            _FlipNumber(value: ss, digitWidth: digitW, digitHeight: digitH, gap: gap),
+            _FlipNumber(value: widget.ss, digitWidth: digitW, digitHeight: digitH, gap: gap),
           ],
         );
       },

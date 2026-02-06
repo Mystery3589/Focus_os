@@ -16,6 +16,7 @@ import '../features/calendar/calendar_screen.dart';
 import '../features/habits/habits_screen.dart';
 import '../features/habits/habit_analytics_screen.dart';
 import '../features/ai_inbox/ai_inbox_screen.dart';
+import '../features/stats/stat_allocation_screen.dart';
 import '../shared/widgets/app_shell.dart';
 
 CustomTransitionPage<void> _fadeSlidePage(GoRouterState state, Widget child) {
@@ -142,6 +143,10 @@ final router = GoRouter(
         GoRoute(
           path: '/ai-inbox',
           pageBuilder: (context, state) => _fadeSlidePage(state, const AiInboxScreen()),
+        ),
+        GoRoute(
+          path: '/allocate-stats',
+          pageBuilder: (context, state) => _fadeSlidePage(state, const StatAllocationScreen()),
         ),
       ],
     ),

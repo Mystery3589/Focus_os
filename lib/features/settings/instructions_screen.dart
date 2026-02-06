@@ -39,22 +39,26 @@ class InstructionsScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: const [
-              Text('How to use Focus GG', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
-              SizedBox(height: 12),
-              Text(
-                '• Missions (Quests): Create missions and track progress.\n'
-                '• Focus: Start a mission focus session. Only one mission can be active at a time.\n'
-                '• Pause/Resume: You can pause a mission and continue later.\n'
-                '• Abandon/Rejoin: Abandoned missions can be rejoined (when no other mission is open).\n'
-                '• Custom sessions: Use Custom Session when you want to focus without a mission. XP is earned at 1 XP/min.\n'
-                '• Analytics: Review your recent focus sessions and XP trends.\n',
-                style: TextStyle(color: AppTheme.textPrimary, height: 1.5),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Tip: If you feel stuck, make missions smaller and time-box them with Pomodoro.',
-                style: TextStyle(color: AppTheme.textSecondary),
-              ),
+                Text('How to use Disciplo', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+                SizedBox(height: 12),
+                Text(
+                  '• Missions (Quests): Create missions and track progress.\n'
+                  '• Focus: Start a mission focus session. Only one mission can be active at a time.\n'
+                  '• Pause/Resume: You can pause a mission and continue later.\n'
+                  '• Abandon/Rejoin: Abandoned missions can be rejoined (when no other mission is open).\n'
+                  '• Custom sessions: Use Custom Session when you want to focus without a mission. XP is earned at 1 XP/min.\n'
+                  '• Analytics: Review your recent focus sessions and XP trends.\n\n'
+                  'Progression:\n'
+                  '• XP needed to level up increases after every level.\n'
+                  '• On each level up, the AI allocates 2–3 stat points automatically based on what you did that level.\n'
+                  '• Every 5 levels, you earn +1 stat point you can allocate manually.\n',
+                  style: TextStyle(color: AppTheme.textPrimary, height: 1.5),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Tip: If you feel stuck, make missions smaller and time-box them with Pomodoro.',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
               ],
             ),
           ),

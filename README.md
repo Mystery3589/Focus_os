@@ -1,4 +1,12 @@
-# focus_flutter
+# Disciplo
+
+Disciplo is a focus + missions (quests) app with a light RPG-style progression system.
+
+## Progression rules
+
+- XP required to reach the next level increases after every level-up.
+- On each level-up, the AI auto-allocates **2–3 stat points** based on what you did that level.
+- Every **5 levels**, you earn **+1 stat point** that you can allocate manually.
 
 ## Cloud sync (Google Drive)
 
@@ -21,7 +29,23 @@ Google Drive sync requires Google OAuth configuration:
 
 If OAuth is not configured, sign-in may appear to work but Drive upload/download can fail.
 
-A new Flutter project.
+#### Windows/Linux (desktop) notes
+
+Google sign-in on Windows/Linux uses a **desktop OAuth** flow (browser-based) and requires a **Desktop** OAuth client ID/secret.
+
+1. In Google Cloud Console, create an **OAuth client ID → Desktop app**
+2. Enable **Google Drive API** for the project
+3. Run the app with desktop credentials via `--dart-define` (recommended: keep them in a local `.env`):
+
+- Put values in `.env`:
+	- `GOOGLE_OAUTH_DESKTOP_CLIENT_ID`
+	- `GOOGLE_OAUTH_DESKTOP_CLIENT_SECRET`
+- Then run:
+	- `flutter run --dart-define-from-file=.env`
+
+## Getting started
+
+This is a Flutter app. Open the project in VS Code, then run it on a device/emulator.
 
 ## Getting Started
 

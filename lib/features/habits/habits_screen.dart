@@ -174,7 +174,7 @@ class _HabitsScreenState extends ConsumerState<HabitsScreen> {
                         Switch(
                           value: _showArchived,
                           onChanged: (v) => setState(() => _showArchived = v),
-                          activeColor: AppTheme.primary,
+                          activeThumbColor: AppTheme.primary,
                         ),
                         const SizedBox(width: 8),
                         const Text('Show archived', style: TextStyle(color: AppTheme.textSecondary)),

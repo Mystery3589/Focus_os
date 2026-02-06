@@ -18,10 +18,13 @@ class QuestCard extends StatelessWidget {
   final VoidCallback? onDelete;
   final VoidCallback? onStart;
   final VoidCallback? onAbandon;
+  final VoidCallback? onCompleteWithoutStarting;
+  final VoidCallback? onAddSubMission;
   final String startLabel;
   final IconData startIcon;
   final bool showOverdue;
   final String? overdueLabel;
+  final String completeWithoutStartingLabel;
 
   const QuestCard({
     super.key,
@@ -37,10 +40,13 @@ class QuestCard extends StatelessWidget {
     this.onDelete,
     this.onStart,
     this.onAbandon,
+    this.onCompleteWithoutStarting,
+    this.onAddSubMission,
     this.startLabel = 'Start',
     this.startIcon = LucideIcons.play,
     this.showOverdue = false,
     this.overdueLabel,
+    this.completeWithoutStartingLabel = 'Complete',
   });
 
   Color get _difficultyColor {
@@ -125,6 +131,17 @@ class QuestCard extends StatelessWidget {
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
+                  if (onAddSubMission != null) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Add sub-mission',
+                      icon: const Icon(LucideIcons.plusCircle, size: 16, color: AppTheme.textSecondary),
+                      onPressed: onAddSubMission,
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
                   const SizedBox(width: 8),
                   if (onDelete != null)
                     IconButton(
@@ -219,6 +236,20 @@ class QuestCard extends StatelessWidget {
                     ),
                   ),
               ],
+            ),
+          ],
+
+          if (onCompleteWithoutStarting != null) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: onCompleteWithoutStarting,
+              icon: const Icon(LucideIcons.check, size: 14),
+              label: Text(completeWithoutStartingLabel),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.textSecondary,
+                side: const BorderSide(color: AppTheme.borderColor),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
             ),
           ],
         ],

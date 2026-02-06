@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // Level-up notification state
 class LevelUpEvent {
   final int newLevel;
-  final int statIncrease;
+  final int aiAllocatedPoints;
+  final int userBonusPoints;
   final DateTime timestamp;
 
   LevelUpEvent({
     required this.newLevel,
-    required this.statIncrease,
+    required this.aiAllocatedPoints,
+    required this.userBonusPoints,
     required this.timestamp,
   });
 }
@@ -16,10 +18,15 @@ class LevelUpEvent {
 class LevelUpNotifier extends StateNotifier<LevelUpEvent?> {
   LevelUpNotifier() : super(null);
 
-  void triggerLevelUp(int newLevel, int statIncrease) {
+  void triggerLevelUp(
+    int newLevel, {
+    required int aiAllocatedPoints,
+    required int userBonusPoints,
+  }) {
     state = LevelUpEvent(
       newLevel: newLevel,
-      statIncrease: statIncrease,
+      aiAllocatedPoints: aiAllocatedPoints,
+      userBonusPoints: userBonusPoints,
       timestamp: DateTime.now(),
     );
   }

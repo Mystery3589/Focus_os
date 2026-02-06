@@ -7,8 +7,11 @@ import 'package:quick_actions/quick_actions.dart';
 
 import 'config/theme.dart';
 import 'config/routes.dart';
+import 'shared/models/focus_session.dart';
 import 'shared/providers/level_up_provider.dart';
+import 'shared/providers/user_provider.dart';
 import 'shared/services/quick_actions_service.dart';
+import 'shared/services/white_noise_service.dart';
 import 'shared/widgets/level_up_modal.dart';
 
 void main() {
@@ -18,7 +21,7 @@ void main() {
     WidgetsFlutterBinding.ensureInitialized();
 
     // Ensure we always get a stack trace in logs on device.
-    var _printedFullRenderFlexOverflow = false;
+    var printedFullRenderFlexOverflow = false;
     FlutterError.onError = (FlutterErrorDetails details) {
       FlutterError.presentError(details);
       final short = details.exceptionAsString();
@@ -26,8 +29,8 @@ void main() {
       // Extra prints help when logs are truncated.
       // For RenderFlex overflows, print the *full* details once so we capture
       // the "relevant error-causing widget" file:line.
-      if (!_printedFullRenderFlexOverflow && short.contains('RenderFlex overflowed')) {
-        _printedFullRenderFlexOverflow = true;
+      if (!printedFullRenderFlexOverflow && short.contains('RenderFlex overflowed')) {
+        printedFullRenderFlexOverflow = true;
         // ignore: avoid_print
         print(details.toString());
       } else {
@@ -70,10 +73,33 @@ class _MyAppState extends ConsumerState<MyApp> {
   static const _qaStartQuickFocus = 'start_quick_focus';
   static const _qaOpenMissions = 'open_missions';
 
+  ProviderSubscription<WhiteNoiseSettings>? _whiteNoiseSub;
+
   @override
   void initState() {
     super.initState();
     _initQuickActions();
+
+    // Keep white-noise playback running regardless of which page is currently visible.
+    // The Focus screen should only update settings; playback is owned by the app shell.
+    _whiteNoiseSub = ref.listenManual<WhiteNoiseSettings>(
+      userProvider.select((s) => s.focus.settings.whiteNoise),
+      (previous, next) {
+        WhiteNoiseService.instance.apply(next);
+      },
+    );
+
+    // Apply immediately on startup so if the user enabled white noise previously,
+    // it starts without requiring navigation to the Focus screen.
+    final cur = ref.read(userProvider).focus.settings.whiteNoise;
+    WhiteNoiseService.instance.apply(cur);
+  }
+
+  @override
+  void dispose() {
+    _whiteNoiseSub?.close();
+    _whiteNoiseSub = null;
+    super.dispose();
   }
 
   Future<void> _initQuickActions() async {
@@ -120,7 +146,7 @@ class _MyAppState extends ConsumerState<MyApp> {
     final levelUpEvent = ref.watch(levelUpProvider);
 
     return MaterialApp.router(
-      title: 'Solo Level Up',
+      title: 'Disciplo',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
       routerConfig: router,
@@ -132,7 +158,8 @@ class _MyAppState extends ConsumerState<MyApp> {
             if (levelUpEvent != null)
               LevelUpModal(
                 newLevel: levelUpEvent.newLevel,
-                statIncrease: levelUpEvent.statIncrease,
+                aiAllocatedPoints: levelUpEvent.aiAllocatedPoints,
+                userBonusPoints: levelUpEvent.userBonusPoints,
                 onDismiss: () {
                   ref.read(levelUpProvider.notifier).clearLevelUp();
                 },

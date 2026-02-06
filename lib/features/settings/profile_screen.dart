@@ -94,7 +94,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ),
               const SizedBox(height: 10),
               const Text(
-                'Jobs and titles are granted by your AI mentor over time. You can only select from what you’ve unlocked.',
+                'Jobs and titles are unlocked by feats (missions completed, focus time, breaks, skills, events). You can only select from what you’ve unlocked.',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 16),
@@ -152,7 +152,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }) {
     final unique = items.toSet().toList()..sort();
     return DropdownButtonFormField<String>(
-      value: value != null && unique.contains(value) ? value : (unique.isNotEmpty ? unique.first : null),
+      initialValue: value != null && unique.contains(value) ? value : (unique.isNotEmpty ? unique.first : null),
       items: unique
           .map(
             (v) => DropdownMenuItem<String>(

@@ -14,10 +14,12 @@ import '../models/focus_session.dart';
 import '../models/skill.dart';
 import '../models/combat.dart';
 import '../models/user_event.dart';
+import '../models/focus_event.dart';
 import '../models/habit.dart';
 import '../services/notification_service.dart';
 import '../services/combat_service.dart';
 import '../services/drive_sync_service.dart';
+import '../services/job_title_unlock_service.dart';
 import 'level_up_provider.dart';
 
 final userProvider = StateNotifierProvider<UserNotifier, UserStats>((ref) {
@@ -34,6 +36,254 @@ class UserNotifier extends StateNotifier<UserStats> {
   Timer? _recoveryTimer;
   static const _uuid = Uuid();
   static final Random _combatRng = Random();
+
+  bool _evaluatingUnlocks = false;
+
+  void _evaluateAchievementUnlocks({int? nowMs}) {
+    if (!mounted) return;
+    if (_evaluatingUnlocks) return;
+    _evaluatingUnlocks = true;
+    try {
+      final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
+
+      final unlocks = JobTitleUnlockService.computeUnlocks(
+        stats: state,
+        jobCatalog: _jobCatalog,
+        titleCatalog: _titleCatalog,
+        nowMs: now,
+      );
+      if (unlocks.isEmpty) return;
+
+      // Apply unlocks (do not auto-switch active job/title).
+      for (final u in unlocks) {
+        if (u.type == UnlockType.job) {
+          _unlockJobInternal(u.name, setActive: false);
+        } else {
+          _unlockTitleInternal(u.name, setActive: false);
+        }
+      }
+
+      // Ensure active selections are valid (defensive for legacy payloads).
+      final nextJob = (state.job != null && state.unlockedJobs.contains(state.job))
+          ? state.job
+          : (state.unlockedJobs.isNotEmpty ? state.unlockedJobs.first : null);
+      final nextTitle = (state.title != null && state.unlockedTitles.contains(state.title))
+          ? state.title
+          : (state.unlockedTitles.isNotEmpty ? state.unlockedTitles.first : null);
+
+      String formatMessage() {
+        const maxLines = 8;
+        final shown = unlocks.take(maxLines).toList(growable: false);
+        final extra = unlocks.length - shown.length;
+        final lines = shown.map((u) => '- ${u.typeLabel}: ${u.name} — ${u.reason}').join('\n');
+        final more = extra > 0 ? '\n…and $extra more.' : '';
+        return 'Achievement unlocked!\n$lines$more\n\nYou can select them in Profile.';
+      }
+
+      final message = formatMessage();
+      final entry = AiInboxMessage(
+        id: _uuid.v4(),
+        text: message,
+        createdAtMs: now,
+        read: false,
+      );
+
+      state = state.copyWith(
+        job: nextJob,
+        title: nextTitle,
+        pendingAiMessage: message,
+        pendingAiMessageAtMs: now,
+        aiInbox: [entry, ...state.aiInbox].take(200).toList(),
+        // Legacy schedule no longer used.
+        nextJobTitleGrantAtMs: null,
+      );
+    } finally {
+      _evaluatingUnlocks = false;
+    }
+  }
+
+  void _logFocusEvent({
+    required String type,
+    String? questId,
+    String? sessionId,
+    int? value,
+    int? atMs,
+  }) {
+    final now = atMs ?? DateTime.now().millisecondsSinceEpoch;
+    final entry = FocusEvent(
+      id: _uuid.v4(),
+      type: type,
+      atMs: now,
+      questId: questId,
+      sessionId: sessionId,
+      value: value,
+    );
+
+    // Bound the log to avoid unbounded growth.
+    const maxEvents = 2000;
+    final existing = state.focusEvents;
+    final next = existing.length >= maxEvents
+        ? [...existing.sublist(existing.length - (maxEvents - 1)), entry]
+        : [...existing, entry];
+    state = state.copyWith(focusEvents: next);
+  }
+
+  int _totalFocusMsFromSegments(List<FocusSegment> segments, {required int nowMs}) {
+    int total = 0;
+    for (final s in segments) {
+      final end = s.endMs ?? nowMs;
+      total += (end - s.startMs);
+    }
+    return total < 0 ? 0 : total;
+  }
+
+  int _nextBreakIntervalMinutes({required FocusOpenSession session, required BreakSettings settings}) {
+    final minI = settings.minIntervalMinutes.clamp(5, 24 * 60);
+    final maxI = settings.maxIntervalMinutes.clamp(minI, 24 * 60);
+
+    // Stable-ish RNG: based on session id and offer count.
+    final seed = session.id.hashCode ^ session.questId.hashCode ^ session.createdAt ^ (session.breakOffers * 997);
+    final rng = Random(seed);
+    if (maxI == minI) return minI;
+    return minI + rng.nextInt(maxI - minI + 1);
+  }
+
+  /// Offers a break for a paused session if due, or always when [force] is true.
+  ///
+  /// Returns the break offer (minutes + skip bonus) if an offer was created.
+  ({int breakMinutes, int skipBonusXp, bool issued})? offerBreakForSession(
+    String sessionId, {
+    bool force = false,
+    bool issued = false,
+  }) {
+    final focus = state.focus;
+    final idx = focus.openSessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1) return null;
+
+    final session = focus.openSessions[idx];
+    if (session.status != 'paused') return null;
+
+    final settings = focus.settings.breaks;
+    if (!settings.enabled && !force) return null;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final totalMs = _totalFocusMsFromSegments(session.segments, nowMs: now);
+    final totalMinutes = (totalMs / 60000).floor();
+    final due = totalMinutes >= session.nextBreakAtTotalMinutes;
+    if (!force && !due) return null;
+
+    final nextInterval = _nextBreakIntervalMinutes(session: session, settings: settings);
+    final nextThreshold = (totalMinutes + nextInterval).clamp(0, 1 << 30);
+
+    final updatedSessions = List<FocusOpenSession>.from(focus.openSessions);
+    updatedSessions[idx] = FocusOpenSession(
+      id: session.id,
+      questId: session.questId,
+      heading: session.heading,
+      createdAt: session.createdAt,
+      status: session.status,
+      segments: session.segments,
+      nextBreakAtTotalMinutes: nextThreshold,
+      breakOffers: session.breakOffers + 1,
+      breaksTaken: session.breaksTaken,
+      breaksSkipped: session.breaksSkipped,
+    );
+
+    state = state.copyWith(
+      focus: FocusState(
+        activeSessionId: focus.activeSessionId,
+        openSessions: updatedSessions,
+        history: focus.history,
+        settings: focus.settings,
+      ),
+    );
+
+    _logFocusEvent(
+      type: issued ? 'break_issued' : 'break_offer',
+      questId: session.questId,
+      sessionId: session.id,
+      atMs: now,
+    );
+
+    return (
+      breakMinutes: settings.breakMinutes,
+      skipBonusXp: settings.skipBonusXp,
+      issued: issued,
+    );
+  }
+
+  void recordBreakTaken(String sessionId) {
+    final focus = state.focus;
+    final idx = focus.openSessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1) return;
+    final s = focus.openSessions[idx];
+
+    final updatedSessions = List<FocusOpenSession>.from(focus.openSessions);
+    updatedSessions[idx] = FocusOpenSession(
+      id: s.id,
+      questId: s.questId,
+      heading: s.heading,
+      createdAt: s.createdAt,
+      status: s.status,
+      segments: s.segments,
+      nextBreakAtTotalMinutes: s.nextBreakAtTotalMinutes,
+      breakOffers: s.breakOffers,
+      breaksTaken: s.breaksTaken + 1,
+      breaksSkipped: s.breaksSkipped,
+    );
+
+    state = state.copyWith(
+      focus: FocusState(
+        activeSessionId: focus.activeSessionId,
+        openSessions: updatedSessions,
+        history: focus.history,
+        settings: focus.settings,
+      ),
+    );
+
+    _logFocusEvent(type: 'break_taken', questId: s.questId, sessionId: s.id);
+    _saveUserStats();
+  }
+
+  void recordBreakSkipped(String sessionId) {
+    final focus = state.focus;
+    final idx = focus.openSessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1) return;
+    final s = focus.openSessions[idx];
+
+    final bonus = focus.settings.breaks.skipBonusXp;
+
+    final updatedSessions = List<FocusOpenSession>.from(focus.openSessions);
+    updatedSessions[idx] = FocusOpenSession(
+      id: s.id,
+      questId: s.questId,
+      heading: s.heading,
+      createdAt: s.createdAt,
+      status: s.status,
+      segments: s.segments,
+      nextBreakAtTotalMinutes: s.nextBreakAtTotalMinutes,
+      breakOffers: s.breakOffers,
+      breaksTaken: s.breaksTaken,
+      breaksSkipped: s.breaksSkipped + 1,
+    );
+
+    state = state.copyWith(
+      focus: FocusState(
+        activeSessionId: focus.activeSessionId,
+        openSessions: updatedSessions,
+        history: focus.history,
+        settings: focus.settings,
+      ),
+    );
+
+    _logFocusEvent(type: 'break_skipped', questId: s.questId, sessionId: s.id);
+    if (bonus > 0) {
+      _logFocusEvent(type: 'bonus_xp', questId: s.questId, sessionId: s.id, value: bonus);
+      addExp(bonus);
+    } else {
+      _saveUserStats();
+    }
+  }
 
   Future<SharedPreferences?> _prefsBestEffort() async {
     // On some Android builds, plugins can be briefly unavailable during very early startup.
@@ -109,6 +359,7 @@ class UserNotifier extends StateNotifier<UserStats> {
 
   Future<void> _loadUserStats() async {
     final prefs = await _prefsBestEffort();
+    if (!mounted) return;
     if (prefs == null) {
       _startRecoveryTimer();
       return;
@@ -121,21 +372,13 @@ class UserNotifier extends StateNotifier<UserStats> {
         _migrateLegacySkillMissionsToQuests();
         _checkOfflineRecovery(prefs);
         _applyOverduePenalties();
-        _ensureJobTitleScheduleInitialized();
+        // Catch up unlocks deterministically based on progress.
+        _evaluateAchievementUnlocks();
       } catch (e) {
         // print('Error loading stats: $e');
       }
     }
     _startRecoveryTimer();
-  }
-
-  void _ensureJobTitleScheduleInitialized() {
-    if (state.nextJobTitleGrantAtMs != null) return;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final rng = Random(now ^ state.level ^ state.exp ^ state.stats.vit);
-    final minutes = 60 + rng.nextInt(180); // 1–4 hours
-    state = state.copyWith(nextJobTitleGrantAtMs: now + Duration(minutes: minutes).inMilliseconds);
-    _saveUserStats();
   }
 
   bool _unlockJobInternal(String job, {bool setActive = true}) {
@@ -211,7 +454,14 @@ class UserNotifier extends StateNotifier<UserStats> {
   }
 
   Future<void> _saveUserStats() async {
+    if (!mounted) return;
+
+    // Unlocks are evaluated deterministically whenever we persist.
+    // This keeps the UX consistent and avoids random/time-based grants.
+    _evaluateAchievementUnlocks();
+
     final prefs = await _prefsBestEffort();
+    if (!mounted) return;
     if (prefs == null) return;
     final payload = jsonEncode(state.toJson());
     await prefs.setString('soloLevelUpUserStats', payload);
@@ -453,6 +703,7 @@ class UserNotifier extends StateNotifier<UserStats> {
   }
 
   void _checkOfflineRecovery(SharedPreferences prefs) {
+    if (!mounted) return;
     // Basic offline recovery logic matching the web app
     final lastRecoveryTimeStr = prefs.getString('lastRecoveryTime');
     if (lastRecoveryTimeStr != null) {
@@ -477,13 +728,19 @@ class UserNotifier extends StateNotifier<UserStats> {
   }
 
   void _startRecoveryTimer() {
+    if (!mounted) return;
     _recoveryTimer?.cancel();
     _recoveryTimer = Timer.periodic(const Duration(minutes: 5), (timer) async {
+       if (!mounted) {
+         timer.cancel();
+         return;
+       }
        // Only recover if not in combat (combat state logic to be added later if needed)
        // For now, mirroring simpler logic
        _applyOverduePenalties();
 
-       _maybeGrantScheduledJobOrTitle();
+      // Safety net: re-check unlocks periodically.
+      _evaluateAchievementUnlocks();
        
        final hpRecovery = (state.maxHp * 0.1).floor();
        final mpRecovery = (state.maxMp * 0.1).floor();
@@ -498,71 +755,6 @@ class UserNotifier extends StateNotifier<UserStats> {
          _saveUserStats();
        }
     });
-  }
-
-  void _maybeGrantScheduledJobOrTitle() {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final nextAt = state.nextJobTitleGrantAtMs;
-    if (nextAt == null) {
-      _ensureJobTitleScheduleInitialized();
-      return;
-    }
-    if (now < nextAt) return;
-
-    final rng = Random(now ^ state.level ^ state.exp ^ state.stats.per ^ state.stats.vit);
-
-    String? grantedJob;
-    String? grantedTitle;
-    final preferJob = rng.nextBool();
-    if (preferJob) {
-      grantedJob = _grantRandomJob(rng);
-      grantedTitle = grantedJob == null ? _grantRandomTitle(rng) : null;
-    } else {
-      grantedTitle = _grantRandomTitle(rng);
-      grantedJob = grantedTitle == null ? _grantRandomJob(rng) : null;
-    }
-
-    final message = grantedJob != null
-        ? 'AI Mentor unlocked a new Job: $grantedJob'
-        : grantedTitle != null
-            ? 'AI Mentor unlocked a new Title: $grantedTitle'
-            : null;
-
-    if (message != null) {
-      final entry = AiInboxMessage(
-        id: _uuid.v4(),
-        text: message,
-        createdAtMs: now,
-        read: false,
-      );
-
-      state = state.copyWith(
-        pendingAiMessage: message,
-        pendingAiMessageAtMs: now,
-        aiInbox: [entry, ...state.aiInbox].take(200).toList(),
-      );
-    }
-
-    // Reschedule either way (even if we've unlocked everything).
-    final minutes = 60 + rng.nextInt(240); // 1–5 hours
-    state = state.copyWith(nextJobTitleGrantAtMs: now + Duration(minutes: minutes).inMilliseconds);
-    _saveUserStats();
-  }
-
-  String? _grantRandomJob(Random rng) {
-    final remaining = _jobCatalog.where((j) => !state.unlockedJobs.contains(j)).toList();
-    if (remaining.isEmpty) return null;
-    final pick = remaining[rng.nextInt(remaining.length)];
-    _unlockJobInternal(pick, setActive: true);
-    return pick;
-  }
-
-  String? _grantRandomTitle(Random rng) {
-    final remaining = _titleCatalog.where((t) => !state.unlockedTitles.contains(t)).toList();
-    if (remaining.isEmpty) return null;
-    final pick = remaining[rng.nextInt(remaining.length)];
-    _unlockTitleInternal(pick, setActive: true);
-    return pick;
   }
 
   void clearPendingAiMessage() {
@@ -898,7 +1090,16 @@ class UserNotifier extends StateNotifier<UserStats> {
       {'stat': 'per', 'weight': weights.per},
       {'stat': 'int', 'weight': weights.intStat},
       {'stat': 'vit', 'weight': weights.vit},
-    ]..sort((a, b) => (b['weight'] as int).compareTo(a['weight'] as int));
+    ]
+      ..sort((a, b) {
+        final byWeight = (b['weight'] as int).compareTo(a['weight'] as int);
+        if (byWeight != 0) return byWeight;
+        // Deterministic tie-breaker (List.sort is not stable).
+        const tie = {'str': 0, 'agi': 1, 'per': 2, 'int': 3, 'vit': 4};
+        final sa = a['stat'] as String;
+        final sb = b['stat'] as String;
+        return (tie[sa] ?? 999).compareTo(tie[sb] ?? 999);
+      });
 
     int idx = 0;
     while (remaining > 0) {
@@ -947,40 +1148,30 @@ class UserNotifier extends StateNotifier<UserStats> {
 
   UserStats _levelUp(UserStats currentStats) {
     final newLevel = currentStats.level + 1;
-    const autoPoints = 5;
-    // Auto increase stats
-    final newStatsStr = currentStats.stats.str + 1;
-    final newStatsAgi = currentStats.stats.agi + 1;
-    final newStatsPer = currentStats.stats.per + 1;
-    final newStatsInt = currentStats.stats.intStat + 1;
-    final newStatsVit = currentStats.stats.vit + 1;
+    // Level-up rules:
+    // - XP required to reach the next level increases every level.
+    // - AI auto-allocates only 2–3 stat points based on tasks completed this level.
+    // - Every 5 levels, the user gains +1 allocatable stat point.
+    final aiAutoPoints = (newLevel % 2 == 0) ? 2 : 3;
+    final userBonusStatPoints = (newLevel % 5 == 0) ? 1 : 0;
+    final expNeeded = max(currentStats.expToNextLevel + 1, (currentStats.expToNextLevel * 1.10).ceil());
 
-    final newMaxHp = (100 + newLevel * 10 + newStatsVit * 5).floor();
-    final newMaxMp = (10 + newLevel * 2 + newStatsInt * 2).floor();
-    final expNeeded = (100 * pow(1.1, newLevel - 1)).floor();
-
-    // Trigger level-up modal
-    ref.read(levelUpProvider.notifier).triggerLevelUp(newLevel, 1); // +1 to all stats
+    // Trigger level-up modal (UI copy uses these fields).
+    ref.read(levelUpProvider.notifier).triggerLevelUp(
+      newLevel,
+      aiAllocatedPoints: aiAutoPoints,
+      userBonusPoints: userBonusStatPoints,
+    );
 
     final leveledStats = currentStats.copyWith(
       level: newLevel,
       exp: currentStats.exp - currentStats.expToNextLevel,
       expToNextLevel: expNeeded,
-      maxHp: newMaxHp,
-      hp: newMaxHp,
-      maxMp: newMaxMp,
-      mp: newMaxMp,
-      stats: currentStats.stats.copyWith(
-        str: newStatsStr,
-        agi: newStatsAgi,
-        per: newStatsPer,
-        intStat: newStatsInt,
-        vit: newStatsVit,
-      ),
+      statPoints: currentStats.statPoints + userBonusStatPoints,
       lastLevelUpAt: DateTime.now().millisecondsSinceEpoch,
     );
 
-    return _autoAllocateStatPoints(leveledStats, autoPoints);
+    return _autoAllocateStatPoints(leveledStats, aiAutoPoints);
   }
 
   void allocateStat(String stat) {
@@ -1021,8 +1212,59 @@ class UserNotifier extends StateNotifier<UserStats> {
     _saveUserStats();
   }
 
+  bool _hasSubMissions(String questId) {
+    return state.quests.any((q) => q.parentQuestId == questId);
+  }
+
+  List<Quest> _directSubMissionsOf(String questId) {
+    return state.quests.where((q) => q.parentQuestId == questId).toList(growable: false);
+  }
+
+  Set<String> _descendantQuestIdsOf(String questId) {
+    final ids = <String>{questId};
+    bool added = true;
+    while (added) {
+      added = false;
+      for (final q in state.quests) {
+        final p = q.parentQuestId;
+        if (p != null && ids.contains(p) && !ids.contains(q.id)) {
+          ids.add(q.id);
+          added = true;
+        }
+      }
+    }
+    return ids;
+  }
+
+  int _focusedMinutesForQuestIds(Iterable<String> questIds) {
+    final idSet = questIds.toSet();
+    final totalMs = state.focus.history
+        .where((h) => idSet.contains(h.questId))
+        .fold<int>(0, (sum, h) => sum + h.totalMs);
+
+    if (totalMs <= 0) return 1;
+    return max(1, (totalMs / 60000).ceil());
+  }
+
+  void _maybeAutoCompleteParentQuest(String parentQuestId) {
+    final parentIdx = state.quests.indexWhere((q) => q.id == parentQuestId);
+    if (parentIdx == -1) return;
+
+    final parent = state.quests[parentIdx];
+    if (parent.completed) return;
+
+    final subs = _directSubMissionsOf(parentQuestId);
+    if (subs.isEmpty) return;
+
+    final allDone = subs.every((q) => q.completed);
+    if (!allDone) return;
+
+    final minutes = _focusedMinutesForQuestIds(subs.map((q) => q.id));
+    completeQuest(parentQuestId, totalMinutes: minutes);
+  }
+
   void updateProfile({String? name, String? job, String? title}) {
-    // Name is user-editable; job/title are intended to be AI-granted and selectable
+    // Name is user-editable; job/title are unlocked via achievements and selectable
     // only from already-unlocked items.
     final nextName = name ?? state.name;
 
@@ -1202,18 +1444,20 @@ class UserNotifier extends StateNotifier<UserStats> {
   }
 
   void deleteQuest(String questId) {
-    final removedSessionIds = state.focus.openSessions
-        .where((s) => s.questId == questId)
-        .map((s) => s.id)
-        .toList(growable: false);
+    final idsToDelete = _descendantQuestIdsOf(questId);
 
-    final updatedQuests = state.quests.where((q) => q.id != questId).toList();
-    final updatedCompleted = state.completedQuests.where((id) => id != questId).toList();
-
-    // Also remove any focus sessions referencing this quest to avoid dangling state.
     final focus = state.focus;
-    final updatedOpen = focus.openSessions.where((s) => s.questId != questId).toList();
-    final updatedHistory = focus.history.where((h) => h.questId != questId).toList();
+    final removedSessionIds = focus.openSessions
+      .where((s) => idsToDelete.contains(s.questId))
+      .map((s) => s.id)
+      .toList(growable: false);
+
+    final updatedQuests = state.quests.where((q) => !idsToDelete.contains(q.id)).toList();
+    final updatedCompleted = state.completedQuests.where((id) => !idsToDelete.contains(id)).toList();
+
+    // Also remove any focus sessions referencing these quests to avoid dangling state.
+    final updatedOpen = focus.openSessions.where((s) => !idsToDelete.contains(s.questId)).toList();
+    final updatedHistory = focus.history.where((h) => !idsToDelete.contains(h.questId)).toList();
 
     String? newActiveId = focus.activeSessionId;
     if (newActiveId != null) {
@@ -1232,7 +1476,9 @@ class UserNotifier extends StateNotifier<UserStats> {
       ),
     );
 
-    unawaited(NotificationService.instance.cancelDueDateReminder(questId));
+    for (final id in idsToDelete) {
+      unawaited(NotificationService.instance.cancelDueDateReminder(id));
+    }
     for (final sessionId in removedSessionIds) {
       unawaited(NotificationService.instance.cancelPausedMissionReminder(sessionId));
     }
@@ -1246,6 +1492,14 @@ class UserNotifier extends StateNotifier<UserStats> {
     
     final quest = state.quests[questIndex];
     if (quest.completed) return;
+
+    // If this is a parent mission with sub-missions, only allow completion when
+    // ALL sub-missions are completed.
+    final subMissions = _directSubMissionsOf(questId);
+    if (subMissions.isNotEmpty) {
+      final hasIncomplete = subMissions.any((q) => !q.completed);
+      if (hasIncomplete) return;
+    }
 
     // Quest is being completed: ensure any due-date reminder is cleared.
     unawaited(NotificationService.instance.cancelDueDateReminder(questId));
@@ -1297,7 +1551,9 @@ class UserNotifier extends StateNotifier<UserStats> {
       }
     }
 
-    final minutes = totalMinutes ?? quest.expectedMinutes ?? 1;
+    final minutes = totalMinutes ?? (subMissions.isNotEmpty
+        ? _focusedMinutesForQuestIds(subMissions.map((q) => q.id))
+        : (quest.expectedMinutes ?? 1));
     final weighted = _applyTaskWeighting(newState.levelTaskWeights, quest, minutes);
     newState = newState.copyWith(levelTaskWeights: weighted);
 
@@ -1313,8 +1569,104 @@ class UserNotifier extends StateNotifier<UserStats> {
       newState = _addSkillExpInternal(newState, quest.skillId!, earnedXp);
     }
 
+    final parentId = quest.parentQuestId;
     state = newState;
     addExp(earnedXp);
+
+    // Completing a sub-mission may complete its parent mission.
+    if (parentId != null) {
+      _maybeAutoCompleteParentQuest(parentId);
+    }
+  }
+
+  /// Completes a quest without requiring a focus session.
+  ///
+  /// This is useful when the user wants to mark a mission done without running
+  /// the timer, while still recording an entry for analytics.
+  ///
+  /// Returns `true` if the quest was completed, `false` if it could not be
+  /// completed (missing quest, already completed, or currently running/paused).
+  bool completeQuestWithoutStarting(String questId) {
+    final questIndex = state.quests.indexWhere((q) => q.id == questId);
+    if (questIndex == -1) return false;
+
+    final quest = state.quests[questIndex];
+    if (quest.completed) return false;
+
+    // Parent missions with sub-missions cannot be manually completed until
+    // all sub-missions are done.
+    final subs = _directSubMissionsOf(questId);
+    if (subs.isNotEmpty && subs.any((q) => !q.completed)) {
+      return false;
+    }
+
+    final focus = state.focus;
+    final sessionsForQuest = focus.openSessions.where((s) => s.questId == questId).toList(growable: false);
+
+    // If there is an active/paused session, completing "without starting" would
+    // create inconsistent state (quest complete but session still open).
+    final hasBlockingSession = sessionsForQuest.any((s) => s.status == 'running' || s.status == 'paused');
+    if (hasBlockingSession) return false;
+
+    // Remove any abandoned sessions for this quest to avoid dangling sessions.
+    final removedSessionIds = sessionsForQuest.map((s) => s.id).toList(growable: false);
+    final updatedOpenSessions = focus.openSessions.where((s) => s.questId != questId).toList(growable: false);
+
+    String? newActiveId = focus.activeSessionId;
+    if (newActiveId != null && !updatedOpenSessions.any((s) => s.id == newActiveId)) {
+      newActiveId = null;
+    }
+
+    final minutes = quest.expectedMinutes ?? 1;
+    final breakdown = _calculateMissionXpBreakdown(actualMinutes: minutes, quest: quest);
+    final earnedXp = breakdown['total'] ?? 0;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final manualLog = FocusSessionLogEntry(
+      id: 'manual-${_uuid.v4()}',
+      questId: questId,
+      startedAt: now,
+      endedAt: now,
+      segments: const [],
+      totalMs: 0,
+      earnedExp: earnedXp,
+      expectedMinutes: breakdown['expected'],
+      deltaMinutes: breakdown['delta'],
+      baseXp: breakdown['base'],
+      bonusXp: breakdown['bonus'],
+      penaltyXp: breakdown['penalty'],
+      difficulty: quest.difficulty,
+      questTitle: quest.title,
+    );
+
+    // Apply focus cleanup + tracking log first so the subsequent `completeQuest`
+    // copies this focus state forward.
+    state = state.copyWith(
+      focus: FocusState(
+        activeSessionId: newActiveId,
+        openSessions: updatedOpenSessions,
+        history: [...focus.history, manualLog],
+        settings: focus.settings,
+      ),
+    );
+
+    for (final sid in removedSessionIds) {
+      unawaited(NotificationService.instance.cancelPausedMissionReminder(sid));
+    }
+
+    // Complete quest + grant rewards.
+    completeQuest(
+      questId,
+      totalMinutes: minutes,
+      earnedExpOverride: earnedXp,
+    );
+
+    // If this was a sub-mission, it may complete the parent.
+    if (quest.parentQuestId != null) {
+      _maybeAutoCompleteParentQuest(quest.parentQuestId!);
+    }
+
+    return true;
   }
 
   UserStats _addSkillExpInternal(UserStats currentStats, String skillId, int amount) {
@@ -1438,6 +1790,12 @@ class UserNotifier extends StateNotifier<UserStats> {
     final now = DateTime.now().millisecondsSinceEpoch;
     var focus = state.focus;
 
+    // Parent missions that have sub-missions act as containers; focus should
+    // be started on sub-missions instead.
+    if (!questId.startsWith('custom-') && _hasSubMissions(questId)) {
+      return false;
+    }
+
     // Enforce: only one non-abandoned mission can be open at a time.
     // If another mission is paused/running, block starting a different one.
     final blocking = focus.openSessions.cast<FocusOpenSession?>().firstWhere(
@@ -1478,7 +1836,11 @@ class UserNotifier extends StateNotifier<UserStats> {
                     heading: s.heading, // Maintain heading
                     createdAt: s.createdAt,
                     status: 'paused',
-                    segments: segments
+                  segments: segments,
+                  nextBreakAtTotalMinutes: s.nextBreakAtTotalMinutes,
+                  breakOffers: s.breakOffers,
+                  breaksTaken: s.breaksTaken,
+                  breaksSkipped: s.breaksSkipped,
                 );
                 focus = FocusState(
                     activeSessionId: null,
@@ -1509,12 +1871,25 @@ class UserNotifier extends StateNotifier<UserStats> {
             heading: existing.heading, // Maintain heading
             createdAt: existing.createdAt,
             status: 'running',
-            segments: segments
+          segments: segments,
+          nextBreakAtTotalMinutes: existing.nextBreakAtTotalMinutes,
+          breakOffers: existing.breakOffers,
+          breaksTaken: existing.breaksTaken,
+          breaksSkipped: existing.breaksSkipped,
         );
+        _logFocusEvent(type: 'focus_resume', questId: existing.questId, sessionId: existing.id, atMs: now);
     } else {
         // Create new
         newActiveId = _uuid.v4(); // Or use questId if unique enough? Web app used questId mostly
         if (questId.startsWith('custom-')) newActiveId = questId;
+
+        // Initialize next break threshold.
+        final breakSettings = focus.settings.breaks;
+        final seed = newActiveId.hashCode ^ questId.hashCode ^ now;
+        final rng = Random(seed);
+        final minI = breakSettings.minIntervalMinutes.clamp(5, 24 * 60);
+        final maxI = breakSettings.maxIntervalMinutes.clamp(minI, 24 * 60);
+        final firstThreshold = maxI == minI ? minI : (minI + rng.nextInt(maxI - minI + 1));
 
         outputSessions.add(FocusOpenSession(
             id: newActiveId,
@@ -1522,8 +1897,14 @@ class UserNotifier extends StateNotifier<UserStats> {
             heading: heading, // Pass the heading
             createdAt: now,
             status: 'running',
-            segments: [FocusSegment(startMs: now)]
+          segments: [FocusSegment(startMs: now)],
+          nextBreakAtTotalMinutes: firstThreshold,
+          breakOffers: 0,
+          breaksTaken: 0,
+          breaksSkipped: 0,
         ));
+
+        _logFocusEvent(type: 'focus_start', questId: questId, sessionId: newActiveId, atMs: now);
     }
 
     state = state.copyWith(focus: FocusState(
@@ -1582,6 +1963,10 @@ class UserNotifier extends StateNotifier<UserStats> {
       createdAt: session.createdAt,
       status: 'paused',
       segments: segments,
+      nextBreakAtTotalMinutes: session.nextBreakAtTotalMinutes,
+      breakOffers: session.breakOffers,
+      breaksTaken: session.breaksTaken,
+      breaksSkipped: session.breaksSkipped,
     );
 
     final pausedSession = updatedSessions[idx];
@@ -1594,6 +1979,8 @@ class UserNotifier extends StateNotifier<UserStats> {
         settings: focus.settings,
       ),
     );
+
+    _logFocusEvent(type: 'focus_pause', questId: pausedSession.questId, sessionId: pausedSession.id, atMs: now);
 
     _syncPausedReminderForSession(pausedSession);
     _saveUserStats();
@@ -1628,6 +2015,10 @@ class UserNotifier extends StateNotifier<UserStats> {
       createdAt: session.createdAt,
       status: 'abandoned',
       segments: segments,
+      nextBreakAtTotalMinutes: session.nextBreakAtTotalMinutes,
+      breakOffers: session.breakOffers,
+      breaksTaken: session.breaksTaken,
+      breaksSkipped: session.breaksSkipped,
     );
 
     state = state.copyWith(
@@ -1641,6 +2032,8 @@ class UserNotifier extends StateNotifier<UserStats> {
 
     // Mission is no longer paused/runnable; clear any paused reminder.
     unawaited(NotificationService.instance.cancelPausedMissionReminder(sessionId));
+
+    _logFocusEvent(type: 'mission_abandon', questId: session.questId, sessionId: session.id, atMs: now);
     _saveUserStats();
   }
 
@@ -1710,7 +2103,7 @@ class UserNotifier extends StateNotifier<UserStats> {
           segments.last = FocusSegment(startMs: segments.last.startMs, endMs: now);
        }
        
-       // Create log
+      // Create log
        final minutes = (elapsedMs / 60000).ceil();
        final isCustomSession = session.questId.startsWith('custom-') || questId.startsWith('custom-');
        const customBaseXpPerMinute = 1;
@@ -1741,6 +2134,14 @@ class UserNotifier extends StateNotifier<UserStats> {
          penaltyXp: breakdown['penalty'],
          difficulty: quest?.difficulty ?? (isCustomSession ? 'CUSTOM' : null),
          questTitle: quest?.title ?? (isCustomSession ? (session.heading?.trim().isNotEmpty == true ? session.heading!.trim() : 'Custom Session') : null),
+       );
+
+       _logFocusEvent(
+         type: 'focus_complete',
+         questId: session.questId,
+         sessionId: session.id,
+         atMs: now,
+         value: log.earnedExp,
        );
        
        // Remove from open sessions, add to history

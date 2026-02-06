@@ -5,6 +5,7 @@ import 'focus_session.dart';
 import 'skill.dart';
 import 'user_event.dart';
 import 'habit.dart';
+import 'focus_event.dart';
 
 class _Unset {
   const _Unset();
@@ -89,6 +90,7 @@ class UserStats {
   final List<SkillGoal> skills;
   final List<UserEvent> userEvents;
   final List<Habit> habits;
+  final List<FocusEvent> focusEvents;
 
   UserStats({
     required this.name,
@@ -121,6 +123,7 @@ class UserStats {
     required this.skills,
     required this.userEvents,
     required this.habits,
+    required this.focusEvents,
   });
 
   factory UserStats.initial() {
@@ -134,7 +137,8 @@ class UserStats {
       title: 'Rookie',
       unlockedJobs: const ['Novice'],
       unlockedTitles: const ['Rookie'],
-      nextJobTitleGrantAtMs: now + const Duration(minutes: 90).inMilliseconds,
+      // Legacy field (random/time-based unlocking) no longer used.
+      nextJobTitleGrantAtMs: null,
       pendingAiMessage: null,
       pendingAiMessageAtMs: null,
       aiInbox: const [],
@@ -179,6 +183,7 @@ class UserStats {
       skills: [],
       userEvents: const [],
       habits: const [],
+      focusEvents: const [],
     );
   }
 
@@ -228,6 +233,12 @@ class UserStats {
         .toList() ??
       <Habit>[];
 
+    final focusEvents = (json['focusEvents'] as List?)
+        ?.whereType<Map>()
+        .map((e) => FocusEvent.fromJson(Map<String, dynamic>.from(e)))
+        .toList() ??
+      <FocusEvent>[];
+
     return UserStats(
       name: json['name'] ?? "",
       level: json['level'] ?? 1,
@@ -259,6 +270,7 @@ class UserStats {
       skills: (json['skills'] as List?)?.map((s) => SkillGoal.fromJson(s)).toList() ?? [],
       userEvents: userEvents,
       habits: habits,
+      focusEvents: focusEvents,
     );
   }
 
@@ -294,6 +306,7 @@ class UserStats {
       'skills': skills.map((s) => s.toJson()).toList(),
       'userEvents': userEvents.map((e) => e.toJson()).toList(),
       'habits': habits.map((h) => h.toJson()).toList(),
+      'focusEvents': focusEvents.map((e) => e.toJson()).toList(),
     };
   }
 
@@ -328,6 +341,7 @@ class UserStats {
     List<SkillGoal>? skills,
     List<UserEvent>? userEvents,
     List<Habit>? habits,
+    List<FocusEvent>? focusEvents,
   }) {
     return UserStats(
       name: name ?? this.name,
@@ -360,6 +374,7 @@ class UserStats {
       skills: skills ?? this.skills,
       userEvents: userEvents ?? this.userEvents,
       habits: habits ?? this.habits,
+      focusEvents: focusEvents ?? this.focusEvents,
     );
   }
 }

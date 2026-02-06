@@ -146,7 +146,7 @@ class AiInboxScreen extends ConsumerWidget {
                       ),
                     ),
                   );
-                }).toList(),
+                }),
               ],
             ),
           ),

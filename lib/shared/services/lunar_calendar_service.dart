@@ -1,5 +1,3 @@
-import 'dart:collection';
-
 import 'package:geoengine/geoengine.dart';
 
 class LunarDayInfo {
@@ -47,7 +45,7 @@ class LunarCalendarService {
 
   // Simple LRU cache by YYYYMMDD key.
   static const int _maxEntries = 512;
-  final _cache = LinkedHashMap<int, LunarDayInfo>();
+  final _cache = <int, LunarDayInfo>{};
 
   int _dayKey(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
 

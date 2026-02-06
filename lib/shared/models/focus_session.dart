@@ -1,33 +1,193 @@
 
+class WhiteNoiseSettings {
+  /// Master toggle.
+  final bool enabled;
+
+  /// "off" | "rain" | "thunderstorm" (or legacy "thunder") | "custom"
+  final String preset;
+
+  /// 0.0 - 1.0
+  final double volume;
+
+  /// Absolute file path when using preset == "custom".
+  final String? customPath;
+
+  const WhiteNoiseSettings({
+    required this.enabled,
+    required this.preset,
+    required this.volume,
+    this.customPath,
+  });
+
+  static WhiteNoiseSettings defaultSettings() {
+    return const WhiteNoiseSettings(
+      enabled: false,
+      preset: 'thunderstorm',
+      volume: 0.45,
+      customPath: null,
+    );
+  }
+
+  WhiteNoiseSettings copyWith({
+    bool? enabled,
+    String? preset,
+    double? volume,
+    String? customPath,
+  }) {
+    return WhiteNoiseSettings(
+      enabled: enabled ?? this.enabled,
+      preset: preset ?? this.preset,
+      volume: volume ?? this.volume,
+      customPath: customPath ?? this.customPath,
+    );
+  }
+
+  factory WhiteNoiseSettings.fromJson(Map<String, dynamic> json) {
+    final rawVol = json['volume'];
+    final vol = (rawVol is num ? rawVol.toDouble() : 0.45).clamp(0.0, 1.0);
+    return WhiteNoiseSettings(
+      enabled: json['enabled'] ?? false,
+      // Default to thunderstorm if missing (new installs will feel consistent).
+      preset: json['preset'] ?? 'thunderstorm',
+      volume: vol,
+      customPath: json['customPath'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'enabled': enabled,
+      'preset': preset,
+      'volume': volume,
+      'customPath': customPath,
+    };
+  }
+}
+
+class BreakSettings {
+  /// When enabled, the app may suggest breaks when you pause after a long focus stretch.
+  final bool enabled;
+
+  /// Random interval lower bound (minutes).
+  final int minIntervalMinutes;
+
+  /// Random interval upper bound (minutes).
+  final int maxIntervalMinutes;
+
+  /// Suggested break duration (minutes).
+  final int breakMinutes;
+
+  /// Bonus XP awarded when skipping a suggested/issued break.
+  final int skipBonusXp;
+
+  const BreakSettings({
+    required this.enabled,
+    required this.minIntervalMinutes,
+    required this.maxIntervalMinutes,
+    required this.breakMinutes,
+    required this.skipBonusXp,
+  });
+
+  static BreakSettings defaultSettings() {
+    return const BreakSettings(
+      enabled: true,
+      minIntervalMinutes: 45,
+      maxIntervalMinutes: 90,
+      breakMinutes: 5,
+      skipBonusXp: 15,
+    );
+  }
+
+  BreakSettings copyWith({
+    bool? enabled,
+    int? minIntervalMinutes,
+    int? maxIntervalMinutes,
+    int? breakMinutes,
+    int? skipBonusXp,
+  }) {
+    return BreakSettings(
+      enabled: enabled ?? this.enabled,
+      minIntervalMinutes: minIntervalMinutes ?? this.minIntervalMinutes,
+      maxIntervalMinutes: maxIntervalMinutes ?? this.maxIntervalMinutes,
+      breakMinutes: breakMinutes ?? this.breakMinutes,
+      skipBonusXp: skipBonusXp ?? this.skipBonusXp,
+    );
+  }
+
+  factory BreakSettings.fromJson(Map<String, dynamic> json) {
+    int asInt(dynamic v, int fallback) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return fallback;
+    }
+
+    final minI = asInt(json['minIntervalMinutes'], 45).clamp(5, 24 * 60);
+    final maxI = asInt(json['maxIntervalMinutes'], 90).clamp(minI, 24 * 60);
+    final breakM = asInt(json['breakMinutes'], 5).clamp(1, 180);
+    final bonus = asInt(json['skipBonusXp'], 15).clamp(0, 1 << 30);
+
+    return BreakSettings(
+      enabled: json['enabled'] ?? true,
+      minIntervalMinutes: minI,
+      maxIntervalMinutes: maxI,
+      breakMinutes: breakM,
+      skipBonusXp: bonus,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'enabled': enabled,
+      'minIntervalMinutes': minIntervalMinutes,
+      'maxIntervalMinutes': maxIntervalMinutes,
+      'breakMinutes': breakMinutes,
+      'skipBonusXp': skipBonusXp,
+    };
+  }
+}
+
 class FocusSettings {
   final String mode; // "pomodoro", "stopwatch"
   /// "normal" | "flip"
   final String clockStyle;
+  /// When using the Flip clock style, play a short tick/click each second.
+  final bool flipClockSoundEnabled;
   final PomodoroSettings pomodoro;
   final XpSettings xp;
   final NotificationSettings notifications;
+  final WhiteNoiseSettings whiteNoise;
+  final BreakSettings breaks;
 
   FocusSettings({
     required this.mode,
     required this.clockStyle,
+    required this.flipClockSoundEnabled,
     required this.pomodoro,
     required this.xp,
     required this.notifications,
+    required this.whiteNoise,
+    required this.breaks,
   });
 
   FocusSettings copyWith({
     String? mode,
     String? clockStyle,
+    bool? flipClockSoundEnabled,
     PomodoroSettings? pomodoro,
     XpSettings? xp,
     NotificationSettings? notifications,
+    WhiteNoiseSettings? whiteNoise,
+    BreakSettings? breaks,
   }) {
     return FocusSettings(
       mode: mode ?? this.mode,
       clockStyle: clockStyle ?? this.clockStyle,
+      flipClockSoundEnabled: flipClockSoundEnabled ?? this.flipClockSoundEnabled,
       pomodoro: pomodoro ?? this.pomodoro,
       xp: xp ?? this.xp,
       notifications: notifications ?? this.notifications,
+      whiteNoise: whiteNoise ?? this.whiteNoise,
+      breaks: breaks ?? this.breaks,
     );
   }
 
@@ -35,9 +195,14 @@ class FocusSettings {
     return FocusSettings(
       mode: json['mode'] ?? 'pomodoro',
       clockStyle: json['clockStyle'] ?? 'normal',
+      flipClockSoundEnabled: json['flipClockSoundEnabled'] ?? false,
       pomodoro: PomodoroSettings.fromJson(json['pomodoro'] ?? {}),
       xp: XpSettings.fromJson(json['xp'] ?? {}),
       notifications: NotificationSettings.fromJson(json['notifications'] ?? {}),
+      whiteNoise: json['whiteNoise'] != null
+          ? WhiteNoiseSettings.fromJson(json['whiteNoise'] ?? {})
+          : WhiteNoiseSettings.defaultSettings(),
+      breaks: json['breaks'] != null ? BreakSettings.fromJson(json['breaks'] ?? {}) : BreakSettings.defaultSettings(),
     );
   }
 
@@ -45,9 +210,12 @@ class FocusSettings {
     return {
       'mode': mode,
       'clockStyle': clockStyle,
+      'flipClockSoundEnabled': flipClockSoundEnabled,
       'pomodoro': pomodoro.toJson(),
       'xp': xp.toJson(),
       'notifications': notifications.toJson(),
+      'whiteNoise': whiteNoise.toJson(),
+      'breaks': breaks.toJson(),
     };
   }
   
@@ -56,9 +224,12 @@ class FocusSettings {
     return FocusSettings(
       mode: 'pomodoro',
       clockStyle: 'normal',
+      flipClockSoundEnabled: false,
       pomodoro: PomodoroSettings(focusMinutes: 25, breakMinutes: 5),
       xp: XpSettings(baseXpPerMinute: 1),
       notifications: NotificationSettings.defaultSettings(),
+      whiteNoise: WhiteNoiseSettings.defaultSettings(),
+      breaks: BreakSettings.defaultSettings(),
     );
   }
 }
@@ -217,6 +388,12 @@ class FocusOpenSession {
   final String status; // "running", "paused", "abandoned"
   final List<FocusSegment> segments;
 
+  /// Breaks are suggested when pausing after this many total focus minutes.
+  final int nextBreakAtTotalMinutes;
+  final int breakOffers;
+  final int breaksTaken;
+  final int breaksSkipped;
+
   FocusOpenSession({
     required this.id,
     required this.questId,
@@ -224,9 +401,19 @@ class FocusOpenSession {
     required this.createdAt,
     required this.status,
     required this.segments,
+    this.nextBreakAtTotalMinutes = 60,
+    this.breakOffers = 0,
+    this.breaksTaken = 0,
+    this.breaksSkipped = 0,
   });
 
   factory FocusOpenSession.fromJson(Map<String, dynamic> json) {
+    int asInt(dynamic v, int fallback) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return fallback;
+    }
+
     return FocusOpenSession(
       id: json['id'],
       questId: json['questId'],
@@ -234,6 +421,10 @@ class FocusOpenSession {
       createdAt: json['createdAt'],
       status: json['status'],
       segments: (json['segments'] as List).map((s) => FocusSegment.fromJson(s)).toList(),
+      nextBreakAtTotalMinutes: asInt(json['nextBreakAtTotalMinutes'], 60),
+      breakOffers: asInt(json['breakOffers'], 0),
+      breaksTaken: asInt(json['breaksTaken'], 0),
+      breaksSkipped: asInt(json['breaksSkipped'], 0),
     );
   }
 
@@ -245,6 +436,10 @@ class FocusOpenSession {
       'createdAt': createdAt,
       'status': status,
       'segments': segments.map((s) => s.toJson()).toList(),
+      'nextBreakAtTotalMinutes': nextBreakAtTotalMinutes,
+      'breakOffers': breakOffers,
+      'breaksTaken': breaksTaken,
+      'breaksSkipped': breaksSkipped,
     };
   }
 }

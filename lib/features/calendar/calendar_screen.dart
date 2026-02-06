@@ -12,8 +12,11 @@ import '../../shared/models/user_event.dart';
 import '../../shared/providers/user_provider.dart';
 import '../../shared/services/india_festival_service.dart';
 import '../../shared/services/lunar_calendar_service.dart';
+import '../../shared/services/public_holiday_service.dart';
+import '../../shared/services/online_festival_calendar_service.dart';
 import '../../shared/widgets/cyber_card.dart';
 import '../../shared/widgets/ai_inbox_bell_action.dart';
+import '../../shared/widgets/app_toast.dart';
 import '../../shared/widgets/page_entrance.dart';
 import '../../shared/widgets/page_container.dart';
 
@@ -36,7 +39,15 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
   bool _showIndiaFestivals = true;
   bool _showChristianFestivals = true;
   bool _showObservances = true;
+  bool _showPublicHolidays = true;
+  bool _showOnlineFestivals = false;
   List<FestivalInstance> _indiaFestivals = const [];
+  List<PublicHolidayInstance> _publicHolidays = const [];
+  int? _publicHolidaysYear;
+  String? _onlineFestivalIcsUrl;
+  List<OnlineFestivalInstance> _onlineFestivals = const [];
+  int? _onlineFestivalsYear;
+  bool _refreshingOnlineFestivals = false;
 
   @override
   void initState() {
@@ -47,6 +58,211 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     _india = IndiaFestivalService(_lunar);
     _moonQuarters = _computeMoonQuartersForMonth(_focusedDay);
     _indiaFestivals = _india.forMonth(_focusedDay);
+
+    // Load cached/fetched yearly public holidays (no-key API). Also prefetch
+    // next year on January so the calendar is instant for the upcoming year.
+    _loadPublicHolidaysForYear(_focusedDay.year);
+    if (_focusedDay.month == 1) {
+      PublicHolidayService.instance.prefetch(year: _focusedDay.year + 1);
+    }
+
+    _loadOnlineFestivalSettings();
+  }
+
+  Future<void> _loadPublicHolidaysForYear(int year) async {
+    final holidays = await PublicHolidayService.instance.forYear(year: year, countryCode: 'IN');
+    if (!mounted) return;
+    // Only update if we're still looking at the same year (avoid stale setState
+    // during fast month paging).
+    if (_focusedDay.year != year) return;
+    setState(() {
+      _publicHolidays = holidays;
+      _publicHolidaysYear = year;
+    });
+  }
+
+  Future<void> _loadOnlineFestivalSettings() async {
+    // One-time default integration (won't overwrite user settings).
+    await OnlineFestivalCalendarService.instance.ensureDefaultIndiaHolidaysLinked();
+
+    final url = await OnlineFestivalCalendarService.instance.getIcsUrl();
+    final enabled = await OnlineFestivalCalendarService.instance.getEnabled();
+
+    if (!mounted) return;
+    setState(() {
+      _onlineFestivalIcsUrl = url;
+      _showOnlineFestivals = enabled && url != null;
+    });
+
+    if (enabled && url != null) {
+      _loadOnlineFestivalsForYear(_focusedDay.year);
+      if (_focusedDay.month == 1) {
+        // Best-effort prefetch for next year (cached by service).
+        OnlineFestivalCalendarService.instance.forYear(year: _focusedDay.year + 1, icsUrl: url);
+      }
+    }
+  }
+
+  Future<void> _loadOnlineFestivalsForYear(int year) async {
+    final url = _onlineFestivalIcsUrl;
+    if (url == null || url.trim().isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _onlineFestivals = const [];
+        _onlineFestivalsYear = year;
+      });
+      return;
+    }
+
+    final data = await OnlineFestivalCalendarService.instance.forYear(year: year, icsUrl: url);
+    if (!mounted) return;
+    if (_focusedDay.year != year) return;
+    setState(() {
+      _onlineFestivals = data.events;
+      _onlineFestivalsYear = year;
+    });
+  }
+
+  Future<void> _refreshOnlineFestivalsNow() async {
+    final url = _onlineFestivalIcsUrl;
+    if (url == null || url.trim().isEmpty) {
+      AppToast.show(context, message: 'Link an online calendar first (ICS URL).');
+      await _openOnlineFestivalLinkDialog();
+      return;
+    }
+
+    if (_refreshingOnlineFestivals) return;
+    setState(() => _refreshingOnlineFestivals = true);
+
+    AppToast.show(context, message: 'Refreshing online festivals…', duration: const Duration(seconds: 2));
+
+    try {
+      final data = await OnlineFestivalCalendarService.instance.refreshYear(year: _focusedDay.year, icsUrl: url);
+      if (!mounted) return;
+      setState(() {
+        _onlineFestivals = data.events;
+        _onlineFestivalsYear = _focusedDay.year;
+      });
+      AppToast.show(context, message: 'Online festivals updated.', duration: const Duration(seconds: 3));
+    } catch (_) {
+      if (!mounted) return;
+      AppToast.show(context, message: 'Couldn\'t refresh online calendar right now.', duration: const Duration(seconds: 4));
+    } finally {
+      if (mounted) setState(() => _refreshingOnlineFestivals = false);
+    }
+  }
+
+  Future<void> _openOnlineFestivalLinkDialog() async {
+    final controller = TextEditingController(text: _onlineFestivalIcsUrl ?? '');
+    var errorText = '';
+
+    final res = await showDialog<String?>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setLocalState) {
+            return AlertDialog(
+              backgroundColor: AppTheme.cardBg,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(color: AppTheme.borderColor),
+              ),
+              title: const Text(
+                'Online festival calendar',
+                style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold),
+              ),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Paste an iCal (ICS) link to *read* festivals/holidays from an online calendar.\n\n'
+                      'Privacy note: this is **read-only**. The app only downloads the ICS feed. It does **not** upload or publish your personal events/meetings anywhere.\n\n'
+                      'Tip: use a public holiday calendar (like Google India Holidays) or a dedicated festival calendar. If you paste a personal Google Calendar ICS link, make sure it\'s one you\'re comfortable sharing (often it\'s a “secret” read-only link).',
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, height: 1.3),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: controller,
+                      style: const TextStyle(color: AppTheme.textPrimary),
+                      decoration: InputDecoration(
+                        hintText: 'https://.../calendar.ics',
+                        errorText: errorText.isEmpty ? null : errorText,
+                        filled: true,
+                        fillColor: AppTheme.background,
+                        enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.borderColor)),
+                        focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
+                      ),
+                      onChanged: (_) {
+                        if (errorText.isNotEmpty) setLocalState(() => errorText = '');
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, '__CLEAR__'),
+                  child: const Text('Clear', style: TextStyle(color: AppTheme.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, null),
+                  child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.black,
+                  ),
+                  onPressed: () {
+                    final v = controller.text.trim();
+                    if (v.isEmpty) {
+                      setLocalState(() => errorText = 'URL is required (or tap Clear)');
+                      return;
+                    }
+                    final uri = Uri.tryParse(v);
+                    if (uri == null || (!uri.isScheme('http') && !uri.isScheme('https'))) {
+                      setLocalState(() => errorText = 'Please enter a valid http/https URL');
+                      return;
+                    }
+                    Navigator.pop(context, v);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (!mounted) return;
+
+    if (res == null) return;
+
+    if (res == '__CLEAR__') {
+      await OnlineFestivalCalendarService.instance.setIcsUrl(null);
+      await OnlineFestivalCalendarService.instance.setEnabled(false);
+      if (!mounted) return;
+      setState(() {
+        _onlineFestivalIcsUrl = null;
+        _showOnlineFestivals = false;
+        _onlineFestivals = const [];
+        _onlineFestivalsYear = null;
+      });
+      return;
+    }
+
+    await OnlineFestivalCalendarService.instance.setIcsUrl(res);
+    await OnlineFestivalCalendarService.instance.setEnabled(true);
+    if (!mounted) return;
+    setState(() {
+      _onlineFestivalIcsUrl = res;
+      _showOnlineFestivals = true;
+    });
+    _loadOnlineFestivalsForYear(_focusedDay.year);
   }
 
   DateTime _dayStart(DateTime d) => DateTime(d.year, d.month, d.day);
@@ -137,13 +353,6 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 
   int _dayKey(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
 
-  DateTime _fromDayKey(int key) {
-    final y = key ~/ 10000;
-    final m = (key % 10000) ~/ 100;
-    final dd = key % 100;
-    return DateTime(y, m, dd);
-  }
-
   /// Starter pack: fixed-date festivals. (Movable festivals can be added as custom events.)
   List<String> _fixedFestivalsForDay(DateTime day) {
     final m = day.month;
@@ -211,6 +420,8 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     required List<Quest> quests,
     required List<MoonQuarter> moonQuarters,
     required List<FestivalInstance> indiaFestivals,
+    required List<PublicHolidayInstance> publicHolidays,
+    required List<OnlineFestivalInstance> onlineFestivals,
   }) {
     final key = _dayKey(day);
 
@@ -253,6 +464,28 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         title: f.title,
         subtitle: 'India • ${f.subtitle}',
       ));
+    }
+
+    if (_showPublicHolidays) {
+      for (final h in publicHolidays) {
+        if (_dayKey(h.localDay) != key) continue;
+        out.add(_CalendarItem(
+          type: _CalendarItemType.festival,
+          title: h.title,
+          subtitle: h.subtitle,
+        ));
+      }
+    }
+
+    if (_showOnlineFestivals) {
+      for (final e in onlineFestivals) {
+        if (_dayKey(e.localDay) != key) continue;
+        out.add(_CalendarItem(
+          type: _CalendarItemType.festival,
+          title: e.title,
+          subtitle: e.subtitle,
+        ));
+      }
     }
 
     // Precise lunar quarter events (New/First/Full/Third) with local time.
@@ -375,6 +608,8 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     required List<Quest> quests,
     required List<MoonQuarter> moonQuarters,
     required List<FestivalInstance> indiaFestivals,
+    required List<PublicHolidayInstance> publicHolidays,
+    required List<OnlineFestivalInstance> onlineFestivals,
   }) {
     // Do not count lunarInfo; otherwise every day gets a marker.
     final items = _itemsForDay(
@@ -383,6 +618,8 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       quests: quests,
       moonQuarters: moonQuarters,
       indiaFestivals: indiaFestivals,
+      publicHolidays: publicHolidays,
+      onlineFestivals: onlineFestivals,
     );
     return items.where((i) => i.type != _CalendarItemType.lunarInfo).length;
   }
@@ -404,6 +641,8 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       quests: userStats.quests,
       moonQuarters: _moonQuarters,
       indiaFestivals: _showIndiaFestivals ? _indiaFestivals : const [],
+      publicHolidays: _publicHolidays,
+      onlineFestivals: _onlineFestivals,
     );
 
     final itemsByDayKey = <int, int>{};
@@ -417,6 +656,8 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         quests: userStats.quests,
         moonQuarters: _moonQuarters,
         indiaFestivals: _showIndiaFestivals ? _indiaFestivals : const [],
+        publicHolidays: _publicHolidays,
+        onlineFestivals: _onlineFestivals,
       );
       if (count > 0) itemsByDayKey[_dayKey(d)] = count;
     }
@@ -465,6 +706,14 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                       _moonQuarters = _computeMoonQuartersForMonth(focusedDay);
                       _indiaFestivals = _india.forMonth(focusedDay);
                     });
+
+                    if (_publicHolidaysYear != focusedDay.year) {
+                      _loadPublicHolidaysForYear(focusedDay.year);
+                    }
+
+                    if (_showOnlineFestivals && _onlineFestivalsYear != focusedDay.year) {
+                      _loadOnlineFestivalsForYear(focusedDay.year);
+                    }
                   },
                   calendarStyle: CalendarStyle(
                     todayDecoration: BoxDecoration(
@@ -529,7 +778,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                                 Switch(
                                   value: _showIndiaFestivals,
                                   onChanged: (v) => setState(() => _showIndiaFestivals = v),
-                                  activeColor: AppTheme.primary,
+                                  activeThumbColor: AppTheme.primary,
                                 ),
                                 const SizedBox(width: 6),
                                 const Text(
@@ -544,7 +793,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                                 Switch(
                                   value: _showObservances,
                                   onChanged: (v) => setState(() => _showObservances = v),
-                                  activeColor: AppTheme.primary,
+                                  activeThumbColor: AppTheme.primary,
                                 ),
                                 const SizedBox(width: 6),
                                 const Text(
@@ -559,7 +808,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                                 Switch(
                                   value: _showChristianFestivals,
                                   onChanged: (v) => setState(() => _showChristianFestivals = v),
-                                  activeColor: AppTheme.primary,
+                                  activeThumbColor: AppTheme.primary,
                                 ),
                                 const SizedBox(width: 6),
                                 const Text(
@@ -574,12 +823,79 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                                 Switch(
                                   value: _showLunarObservances,
                                   onChanged: (v) => setState(() => _showLunarObservances = v),
-                                  activeColor: AppTheme.primary,
+                                  activeThumbColor: AppTheme.primary,
                                 ),
                                 const SizedBox(width: 6),
                                 const Text(
                                   'Lunar',
                                   style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Switch(
+                                  value: _showPublicHolidays,
+                                  onChanged: (v) => setState(() => _showPublicHolidays = v),
+                                  activeThumbColor: AppTheme.primary,
+                                ),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  'Holidays',
+                                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Switch(
+                                  value: _showOnlineFestivals,
+                                  onChanged: (v) async {
+                                    if (v) {
+                                      // Need a URL to enable.
+                                      if ((_onlineFestivalIcsUrl ?? '').trim().isEmpty) {
+                                        await _openOnlineFestivalLinkDialog();
+                                        return;
+                                      }
+                                      await OnlineFestivalCalendarService.instance.setEnabled(true);
+                                      if (!mounted) return;
+                                      setState(() => _showOnlineFestivals = true);
+                                      _loadOnlineFestivalsForYear(_focusedDay.year);
+                                    } else {
+                                      await OnlineFestivalCalendarService.instance.setEnabled(false);
+                                      if (!mounted) return;
+                                      setState(() => _showOnlineFestivals = false);
+                                    }
+                                  },
+                                  activeThumbColor: AppTheme.primary,
+                                ),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  'Online',
+                                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                                ),
+                                const SizedBox(width: 6),
+                                IconButton(
+                                  tooltip: 'Refresh online festivals',
+                                  icon: Icon(
+                                    LucideIcons.refreshCcw,
+                                    size: 16,
+                                    color: _refreshingOnlineFestivals ? AppTheme.textSecondary.withOpacity(0.5) : AppTheme.textSecondary,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  onPressed: _refreshingOnlineFestivals ? null : _refreshOnlineFestivalsNow,
+                                ),
+                                IconButton(
+                                  tooltip: 'Link online calendar (ICS)',
+                                  icon: const Icon(LucideIcons.link2, size: 16, color: AppTheme.textSecondary),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  onPressed: _openOnlineFestivalLinkDialog,
                                 ),
                               ],
                             ),
@@ -650,7 +966,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                         ),
                       )
                     else
-                      ...items.map((i) => _buildItemTile(context, i)).toList(),
+                      ...items.map((i) => _buildItemTile(context, i)),
                   ],
                 ),
               ),

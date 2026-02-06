@@ -8,6 +8,7 @@ import '../../config/theme.dart';
 import '../models/quest.dart';
 import '../providers/user_provider.dart';
 import '../services/local_backup_service.dart';
+import '../services/mission_description_ai_service.dart';
 
 int _baseXpPerMinute(String difficulty) {
   switch (difficulty.toUpperCase()) {
@@ -40,10 +41,20 @@ Future<void> showMissionDialog(
   WidgetRef ref, {
   Quest? quest,
   String? presetSkillId,
+  String? parentQuestId,
 }) async {
   final rootContext = context;
   final skills = ref.read(userProvider).skills;
   final isEdit = quest != null;
+
+  // If creating a sub-mission, use the parent's skill by default.
+  final effectiveParentId = quest?.parentQuestId ?? parentQuestId;
+  Quest? parentQuest;
+  if (!isEdit && effectiveParentId != null) {
+    try {
+      parentQuest = ref.read(userProvider).quests.firstWhere((q) => q.id == effectiveParentId);
+    } catch (_) {}
+  }
 
   final titleController = TextEditingController(text: quest?.title ?? '');
   final descController = TextEditingController(text: quest?.description ?? '');
@@ -51,7 +62,7 @@ Future<void> showMissionDialog(
   String difficulty = quest?.difficulty ?? 'B';
   String priority = quest?.priority ?? 'B';
   String frequency = quest?.frequency ?? 'none';
-  String? selectedSkillId = quest?.skillId ?? presetSkillId;
+  String? selectedSkillId = quest?.skillId ?? presetSkillId ?? parentQuest?.skillId;
 
   bool useExpectedLength = quest?.expectedMinutes != null || !isEdit;
   int expectedValue = (quest?.expectedMinutes ?? 60);
@@ -67,6 +78,7 @@ Future<void> showMissionDialog(
 
   final scrollController = ScrollController();
   bool showValidationErrors = false;
+  bool isEnhancingDescription = false;
 
   await showDialog(
     context: context,
@@ -210,7 +222,9 @@ Future<void> showMissionDialog(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  isEdit ? 'Edit Mission' : 'Create New Mission',
+                                  isEdit
+                                      ? 'Edit Mission'
+                                      : (effectiveParentId != null ? 'Create Sub-mission' : 'Create New Mission'),
                                   style: const TextStyle(
                                     color: AppTheme.primary,
                                     fontWeight: FontWeight.w800,
@@ -218,9 +232,12 @@ Future<void> showMissionDialog(
                                   ),
                                 ),
                                 const SizedBox(height: 4),
-                                const Text(
-                                  'Add a new mission to track your real-life progress',
-                                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+
+                                Text(
+                                  effectiveParentId != null && parentQuest != null
+                                      ? 'Sub-mission of “${parentQuest.title}”'
+                                      : 'Add a new mission to track your real-life progress',
+                                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                                 ),
                               ],
                             ),
@@ -259,7 +276,52 @@ Future<void> showMissionDialog(
                               ),
                               const SizedBox(height: 14),
 
-                              sectionLabel('Description'),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Description',
+                                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                                    ),
+                                  ),
+                                  TextButton.icon(
+                                    onPressed: isEnhancingDescription
+                                        ? null
+                                        : () {
+                                            final t = titleController.text.trim();
+                                            if (t.isEmpty) {
+                                              setState(() => showValidationErrors = true);
+                                              return;
+                                            }
+
+                                            setState(() => isEnhancingDescription = true);
+                                            final enhanced = MissionDescriptionAiService.enhance(
+                                              title: t,
+                                              description: descController.text,
+                                              expectedMinutes: useExpectedLength ? expectedMinutes : null,
+                                            );
+                                            descController.text = enhanced;
+                                            descController.selection = TextSelection.fromPosition(
+                                              TextPosition(offset: descController.text.length),
+                                            );
+                                            setState(() => isEnhancingDescription = false);
+                                          },
+                                    icon: Icon(
+                                      LucideIcons.sparkles,
+                                      size: 16,
+                                      color: isEnhancingDescription ? AppTheme.textSecondary : AppTheme.primary,
+                                    ),
+                                    label: Text(
+                                      isEnhancingDescription ? 'Enhancing…' : 'Enhance with AI',
+                                      style: TextStyle(
+                                        color: isEnhancingDescription ? AppTheme.textSecondary : AppTheme.primary,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                               TextField(
                                 controller: descController,
                                 style: const TextStyle(color: AppTheme.textPrimary),
@@ -278,7 +340,7 @@ Future<void> showMissionDialog(
                                       children: [
                                         sectionLabel('Difficulty'),
                                         DropdownButtonFormField<String>(
-                                          value: difficulty,
+                                          initialValue: difficulty,
                                           dropdownColor: AppTheme.background,
                                           decoration: fieldDecoration('Difficulty'),
                                           style: const TextStyle(color: AppTheme.textPrimary),
@@ -303,7 +365,7 @@ Future<void> showMissionDialog(
                                       children: [
                                         sectionLabel('Priority'),
                                         DropdownButtonFormField<String>(
-                                          value: priority,
+                                          initialValue: priority,
                                           dropdownColor: AppTheme.background,
                                           decoration: fieldDecoration('Priority'),
                                           style: const TextStyle(color: AppTheme.textPrimary),
@@ -328,7 +390,7 @@ Future<void> showMissionDialog(
 
                               sectionLabel('Frequency'),
                               DropdownButtonFormField<String>(
-                                value: frequency,
+                                initialValue: frequency,
                                 dropdownColor: AppTheme.background,
                                 decoration: fieldDecoration('Frequency'),
                                 style: const TextStyle(color: AppTheme.textPrimary),
@@ -402,7 +464,7 @@ Future<void> showMissionDialog(
                                   SizedBox(
                                     width: 160,
                                     child: DropdownButtonFormField<String>(
-                                      value: expectedUnit,
+                                      initialValue: expectedUnit,
                                       dropdownColor: AppTheme.background,
                                       decoration: fieldDecoration('Unit'),
                                       style: const TextStyle(color: AppTheme.textPrimary),
@@ -424,7 +486,7 @@ Future<void> showMissionDialog(
 
                               sectionLabel('Assign to Skill (optional)'),
                               DropdownButtonFormField<String?>(
-                                value: selectedSkillId,
+                                initialValue: selectedSkillId,
                                 dropdownColor: AppTheme.background,
                                 decoration: fieldDecoration('Skill'),
                                 style: const TextStyle(color: AppTheme.textPrimary),
@@ -679,6 +741,7 @@ Future<void> showMissionDialog(
                                           expectedMinutes: expectedMinutesSave,
                                           frequency: frequency,
                                           lastPenaltyDate: null,
+                                          parentQuestId: effectiveParentId,
                                         ),
                                       );
                                 }
