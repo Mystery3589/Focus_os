@@ -20,6 +20,8 @@ import '../services/notification_service.dart';
 import '../services/combat_service.dart';
 import '../services/drive_sync_service.dart';
 import '../services/job_title_unlock_service.dart';
+import '../services/local_backup_service.dart';
+import '../services/device_identity_service.dart';
 import 'level_up_provider.dart';
 
 final userProvider = StateNotifierProvider<UserNotifier, UserStats>((ref) {
@@ -33,9 +35,25 @@ class UserNotifier extends StateNotifier<UserStats> {
     _loadUserStats();
   }
 
+  bool _autoDownloadAttemptedThisRun = false;
+
+  DeviceIdentity? _deviceIdentity;
+
   Timer? _recoveryTimer;
   static const _uuid = Uuid();
   static final Random _combatRng = Random();
+
+  Future<DeviceIdentity?> _deviceBestEffort() async {
+    final cached = _deviceIdentity;
+    if (cached != null) return cached;
+    try {
+      final id = await DeviceIdentityService.instance.getIdentity();
+      _deviceIdentity = id;
+      return id;
+    } catch (_) {
+      return null;
+    }
+  }
 
   bool _evaluatingUnlocks = false;
 
@@ -183,6 +201,9 @@ class UserNotifier extends StateNotifier<UserStats> {
       createdAt: session.createdAt,
       status: session.status,
       segments: session.segments,
+      deviceId: session.deviceId,
+      deviceLabel: session.deviceLabel,
+      lastHeartbeatAtMs: session.lastHeartbeatAtMs,
       nextBreakAtTotalMinutes: nextThreshold,
       breakOffers: session.breakOffers + 1,
       breaksTaken: session.breaksTaken,
@@ -226,6 +247,9 @@ class UserNotifier extends StateNotifier<UserStats> {
       createdAt: s.createdAt,
       status: s.status,
       segments: s.segments,
+      deviceId: s.deviceId,
+      deviceLabel: s.deviceLabel,
+      lastHeartbeatAtMs: s.lastHeartbeatAtMs,
       nextBreakAtTotalMinutes: s.nextBreakAtTotalMinutes,
       breakOffers: s.breakOffers,
       breaksTaken: s.breaksTaken + 1,
@@ -261,6 +285,9 @@ class UserNotifier extends StateNotifier<UserStats> {
       createdAt: s.createdAt,
       status: s.status,
       segments: s.segments,
+      deviceId: s.deviceId,
+      deviceLabel: s.deviceLabel,
+      lastHeartbeatAtMs: s.lastHeartbeatAtMs,
       nextBreakAtTotalMinutes: s.nextBreakAtTotalMinutes,
       breakOffers: s.breakOffers,
       breaksTaken: s.breaksTaken,
@@ -364,6 +391,10 @@ class UserNotifier extends StateNotifier<UserStats> {
       _startRecoveryTimer();
       return;
     }
+
+    // Cache a per-install device id for cross-device focus semantics.
+    unawaited(_deviceBestEffort());
+
     final jsonString = prefs.getString('soloLevelUpUserStats');
     if (jsonString != null) {
       try {
@@ -379,6 +410,103 @@ class UserNotifier extends StateNotifier<UserStats> {
       }
     }
     _startRecoveryTimer();
+
+    // Optional: download cloud backup on startup and overwrite local state.
+    // This is intentionally best-effort and runs after local load so the UI
+    // can render even if Drive is slow/unavailable.
+    unawaited(_maybeAutoDownloadFromDriveOnOpen(prefs));
+  }
+
+  bool _isRemoteModifiedNewer(String remoteIso, String localIso) {
+    final r = DateTime.tryParse(remoteIso);
+    final l = DateTime.tryParse(localIso);
+    if (r == null || l == null) return remoteIso.compareTo(localIso) > 0;
+    return r.isAfter(l);
+  }
+
+  /// Polls Drive for a newer backup and overwrites local data when found.
+  ///
+  /// This is used for cross-device sync ("upload on device A" → "download on device B").
+  ///
+  /// Safety: always writes a local restore point before overwriting.
+  Future<void> syncFromDriveIfRemoteNewer({bool force = false}) async {
+    if (!mounted) return;
+
+    final prefs = await _prefsBestEffort();
+    if (!mounted) return;
+    if (prefs == null) return;
+
+    // Reuse the existing overwrite toggle.
+    final enabled = prefs.getBool(DriveSyncService.prefAutoDownloadOnOpen) ?? false;
+    if (!force && !enabled) return;
+
+    await DriveSyncService.instance.signInSilently();
+    final signedIn = await DriveSyncService.instance.isSignedIn();
+    if (!signedIn) return;
+
+    final localSeen = prefs.getString(DriveSyncService.prefLastRemoteModified);
+    final remote = await DriveSyncService.instance.peekLatestRemoteModifiedTimeRfc3339();
+    if (remote == null || remote.trim().isEmpty) return;
+
+    if (!force && localSeen != null && localSeen.trim().isNotEmpty) {
+      if (!_isRemoteModifiedNewer(remote, localSeen)) return;
+    }
+
+    final dl = await DriveSyncService.instance.downloadLatest();
+    if (dl == null) return;
+
+    final localBefore = exportUserStatsJson(pretty: false);
+    try {
+      await LocalBackupService.instance.saveRestorePoint(
+        json: localBefore,
+        reason: 'drive_auto_sync_remote_change',
+      );
+    } catch (_) {}
+
+    final ok = await importUserStatsJson(dl.json);
+    if (!ok) return;
+
+    await prefs.setInt(
+      DriveSyncService.prefLastAutoDownloadAtMs,
+      DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  Future<void> _maybeAutoDownloadFromDriveOnOpen(SharedPreferences prefs) async {
+    if (!mounted) return;
+    if (_autoDownloadAttemptedThisRun) return;
+    _autoDownloadAttemptedThisRun = true;
+
+    final enabled = prefs.getBool(DriveSyncService.prefAutoDownloadOnOpen) ?? false;
+    if (!enabled) return;
+
+    // Try to authenticate silently.
+    await DriveSyncService.instance.signInSilently();
+    final signedIn = await DriveSyncService.instance.isSignedIn();
+    if (!signedIn) return;
+
+    final dl = await DriveSyncService.instance.downloadLatest();
+    if (dl == null) return;
+
+    // Save a local restore point before overwriting.
+    final localBefore = exportUserStatsJson(pretty: false);
+    try {
+      await LocalBackupService.instance.saveRestorePoint(
+        json: localBefore,
+        reason: 'drive_auto_download_overwrite',
+      );
+    } catch (_) {
+      // Best-effort; proceed with overwrite even if restore point fails.
+    }
+
+    // Overwrite local data with the remote backup.
+    final ok = await importUserStatsJson(dl.json);
+    if (ok) {
+      await prefs.setInt(
+        DriveSyncService.prefLastAutoDownloadAtMs,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    }
   }
 
   bool _unlockJobInternal(String job, {bool setActive = true}) {
@@ -494,10 +622,18 @@ class UserNotifier extends StateNotifier<UserStats> {
   /// - re-syncs notifications
   Future<bool> importUserStatsJson(String jsonString) async {
     try {
+      final preservedName = state.name;
       final decoded = jsonDecode(jsonString);
       if (decoded is! Map<String, dynamic>) return false;
 
       state = UserStats.fromJson(decoded);
+
+      // If the incoming payload doesn't have a name (common when syncing between
+      // devices that haven't completed onboarding), keep the existing local name
+      // so we don't re-prompt every app start.
+      if (state.name.trim().isEmpty && preservedName.trim().isNotEmpty) {
+        state = state.copyWith(name: preservedName);
+      }
 
       // Bring older payloads forward.
       _migrateLegacySkillMissionsToQuests();
@@ -1790,6 +1926,10 @@ class UserNotifier extends StateNotifier<UserStats> {
     final now = DateTime.now().millisecondsSinceEpoch;
     var focus = state.focus;
 
+    // Device metadata is best-effort; if unavailable we still function.
+    final deviceId = _deviceIdentity?.id;
+    final deviceLabel = _deviceIdentity?.label;
+
     // Parent missions that have sub-missions act as containers; focus should
     // be started on sub-missions instead.
     if (!questId.startsWith('custom-') && _hasSubMissions(questId)) {
@@ -1837,6 +1977,9 @@ class UserNotifier extends StateNotifier<UserStats> {
                     createdAt: s.createdAt,
                     status: 'paused',
                   segments: segments,
+                  deviceId: s.deviceId,
+                  deviceLabel: s.deviceLabel,
+                  lastHeartbeatAtMs: s.lastHeartbeatAtMs,
                   nextBreakAtTotalMinutes: s.nextBreakAtTotalMinutes,
                   breakOffers: s.breakOffers,
                   breaksTaken: s.breaksTaken,
@@ -1872,6 +2015,9 @@ class UserNotifier extends StateNotifier<UserStats> {
             createdAt: existing.createdAt,
             status: 'running',
           segments: segments,
+          deviceId: deviceId ?? existing.deviceId,
+          deviceLabel: deviceLabel ?? existing.deviceLabel,
+          lastHeartbeatAtMs: now,
           nextBreakAtTotalMinutes: existing.nextBreakAtTotalMinutes,
           breakOffers: existing.breakOffers,
           breaksTaken: existing.breaksTaken,
@@ -1898,6 +2044,9 @@ class UserNotifier extends StateNotifier<UserStats> {
             createdAt: now,
             status: 'running',
           segments: [FocusSegment(startMs: now)],
+          deviceId: deviceId,
+          deviceLabel: deviceLabel,
+          lastHeartbeatAtMs: now,
           nextBreakAtTotalMinutes: firstThreshold,
           breakOffers: 0,
           breaksTaken: 0,
@@ -1916,6 +2065,71 @@ class UserNotifier extends StateNotifier<UserStats> {
 
     // Resuming (or starting) should cancel any paused reminder for this session.
     unawaited(NotificationService.instance.cancelPausedMissionReminder(newActiveId));
+    _saveUserStats();
+    return true;
+  }
+
+  /// Continue an existing open session on *this* device.
+  ///
+  /// This is used when another device is currently running the session.
+  /// We preserve continuity by closing any currently-open segment and starting
+  /// a new segment at the takeover time.
+  Future<bool> continueOpenSessionOnThisDevice(String sessionId) async {
+    if (!mounted) return false;
+
+    final focus = state.focus;
+    final idx = focus.openSessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1) return false;
+
+    final session = focus.openSessions[idx];
+    if (session.status == 'abandoned') return false;
+
+    // Enforce: only one non-abandoned mission can be open at a time.
+    final blocking = focus.openSessions.cast<FocusOpenSession?>().firstWhere(
+      (s) => s != null && s.status != 'abandoned' && s.id != sessionId,
+      orElse: () => null,
+    );
+    if (blocking != null) return false;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    final identity = await _deviceBestEffort();
+    final deviceId = identity?.id;
+    final deviceLabel = identity?.label;
+
+    final segments = List<FocusSegment>.from(session.segments);
+    if (segments.isNotEmpty && segments.last.endMs == null) {
+      segments[segments.length - 1] = FocusSegment(startMs: segments.last.startMs, endMs: now);
+    }
+    segments.add(FocusSegment(startMs: now));
+
+    final updatedSessions = List<FocusOpenSession>.from(focus.openSessions);
+    updatedSessions[idx] = FocusOpenSession(
+      id: session.id,
+      questId: session.questId,
+      heading: session.heading,
+      createdAt: session.createdAt,
+      status: 'running',
+      segments: segments,
+      deviceId: deviceId ?? session.deviceId,
+      deviceLabel: deviceLabel ?? session.deviceLabel,
+      lastHeartbeatAtMs: now,
+      nextBreakAtTotalMinutes: session.nextBreakAtTotalMinutes,
+      breakOffers: session.breakOffers,
+      breaksTaken: session.breaksTaken,
+      breaksSkipped: session.breaksSkipped,
+    );
+
+    state = state.copyWith(
+      focus: FocusState(
+        activeSessionId: session.id,
+        openSessions: updatedSessions,
+        history: focus.history,
+        settings: focus.settings,
+      ),
+    );
+
+    _logFocusEvent(type: 'focus_takeover', questId: session.questId, sessionId: session.id, atMs: now);
     _saveUserStats();
     return true;
   }
@@ -1963,6 +2177,9 @@ class UserNotifier extends StateNotifier<UserStats> {
       createdAt: session.createdAt,
       status: 'paused',
       segments: segments,
+      deviceId: session.deviceId,
+      deviceLabel: session.deviceLabel,
+      lastHeartbeatAtMs: session.lastHeartbeatAtMs,
       nextBreakAtTotalMinutes: session.nextBreakAtTotalMinutes,
       breakOffers: session.breakOffers,
       breaksTaken: session.breaksTaken,
@@ -2015,6 +2232,9 @@ class UserNotifier extends StateNotifier<UserStats> {
       createdAt: session.createdAt,
       status: 'abandoned',
       segments: segments,
+      deviceId: session.deviceId,
+      deviceLabel: session.deviceLabel,
+      lastHeartbeatAtMs: session.lastHeartbeatAtMs,
       nextBreakAtTotalMinutes: session.nextBreakAtTotalMinutes,
       breakOffers: session.breakOffers,
       breaksTaken: session.breaksTaken,

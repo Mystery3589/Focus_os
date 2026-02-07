@@ -38,6 +38,42 @@ Quest _q({
 }
 
 void main() {
+  test('sort by priority desc supports legacy High/Medium/Low', () {
+    final quests = <Quest>[
+      _q(id: 'low', title: 'Low', priority: 'Low', createdAt: 1),
+      _q(id: 'high', title: 'High', priority: 'High', createdAt: 2),
+      _q(id: 'med', title: 'Medium', priority: 'Medium', createdAt: 3),
+    ];
+
+    final sorted = filterAndSortQuests(
+      quests: quests,
+      isCompleted: false,
+      openSessions: const <FocusOpenSession>[],
+      sortRules: const [QuestSortRule('priority', false)],
+    );
+
+    expect(sorted.map((q) => q.id).toList(), ['high', 'med', 'low']);
+  });
+
+  test('sort by priority desc supports mixed legacy + S/A/B', () {
+    final quests = <Quest>[
+      _q(id: 'a', title: 'A', priority: 'A', createdAt: 1),
+      _q(id: 'high', title: 'High', priority: 'High', createdAt: 2),
+      _q(id: 'low', title: 'Low', priority: 'Low', createdAt: 3),
+      _q(id: 'b', title: 'B', priority: 'B', createdAt: 4),
+    ];
+
+    final sorted = filterAndSortQuests(
+      quests: quests,
+      isCompleted: false,
+      openSessions: const <FocusOpenSession>[],
+      sortRules: const [QuestSortRule('priority', false)],
+    );
+
+    // High should rank with S, then A, then B, then Low(D)
+    expect(sorted.map((q) => q.id).toList(), ['high', 'a', 'b', 'low']);
+  });
+
   test('multi-sort: priority desc, due asc, difficulty desc', () {
     final quests = <Quest>[
       _q(

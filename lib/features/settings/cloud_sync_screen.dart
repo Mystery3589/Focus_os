@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -25,9 +26,10 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
   bool _loading = true;
   bool _signedIn = false;
   bool _autoUpload = false;
+  bool _autoDownloadOnOpen = false;
+  int? _lastAutoDownloadAtMs;
   DriveSyncStatus? _status;
 
-  bool get _driveSupported => DriveSyncService.instance.isPlatformSupported;
   bool get _desktopConfigMissing => DriveSyncService.instance.isDesktopConfigMissing;
 
   @override
@@ -50,6 +52,8 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
       if (!mounted) return;
       setState(() {
         _autoUpload = prefs.getBool(DriveSyncService.prefAutoUpload) ?? false;
+        _autoDownloadOnOpen = prefs.getBool(DriveSyncService.prefAutoDownloadOnOpen) ?? false;
+        _lastAutoDownloadAtMs = prefs.getInt(DriveSyncService.prefLastAutoDownloadAtMs);
         _signedIn = signedIn;
         _status = status;
       });
@@ -73,6 +77,43 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
           '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     } catch (_) {
       return iso;
+    }
+  }
+
+  String _fmtLastError(DriveSyncStatus? status) {
+    final msg = status?.lastError;
+    if (msg == null || msg.trim().isEmpty) return '—';
+
+    final at = status?.lastErrorAtMs;
+    if (at == null) return msg;
+    final t = _fmtMs(at);
+    return '[$t] $msg';
+  }
+
+  String _signInFailedMessage() {
+    // Only show desktop OAuth instructions when we're actually on a desktop OAuth platform
+    // and the required client config is missing.
+    if (_desktopConfigMissing) {
+      return 'Sign-in cancelled/failed. On Windows/Linux, you must provide Desktop OAuth client ID/secret via --dart-define.';
+    }
+
+    // Otherwise keep it generic; Android/iOS use the `google_sign_in` plugin.
+    // (If Google Sign-In is not configured for the app, the plugin may fail here.)
+    if (kIsWeb) {
+      return 'Sign-in cancelled/failed. Please try again.';
+    }
+
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return 'Sign-in cancelled/failed. If this keeps happening, make sure Google Sign-In is configured for this app.';
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+        // If we got here, desktop config exists; so just show generic failure.
+        return 'Sign-in cancelled/failed. Please try again.';
+      case TargetPlatform.macOS:
+      case TargetPlatform.fuchsia:
+        return 'Sign-in cancelled/failed. Please try again.';
     }
   }
 
@@ -117,7 +158,7 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                   if (_desktopConfigMissing) ...[
                     const SizedBox(height: 10),
                     const Text(
-                      'Windows Google Drive sign-in needs a Google OAuth “Desktop app” client.\n'
+                      'Windows/Linux Google Drive sign-in needs a Google OAuth “Desktop app” client.\n'
                       'Run with:\n'
                       '  --dart-define=GOOGLE_OAUTH_DESKTOP_CLIENT_ID=...\n'
                       '  --dart-define=GOOGLE_OAUTH_DESKTOP_CLIENT_SECRET=...\n',
@@ -138,8 +179,10 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                   const SizedBox(height: 12),
                   _kv('Last upload', _fmtMs(_status?.lastUploadAtMs)),
                   _kv('Last download', _fmtMs(_status?.lastDownloadAtMs)),
+                  _kv('Last auto-download', _fmtMs(_lastAutoDownloadAtMs)),
                   _kv('Last local save', _fmtMs(_status?.lastLocalSaveAtMs)),
                   _kv('Remote modified', _status?.lastRemoteModifiedTimeRfc3339 ?? '—'),
+                  _kv('Last error', _fmtLastError(_status)),
                   const SizedBox(height: 10),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -153,6 +196,24 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                       final prefs = await SharedPreferences.getInstance();
                       await prefs.setBool(DriveSyncService.prefAutoUpload, val);
                       setState(() => _autoUpload = val);
+                    },
+                  ),
+                  const Divider(color: AppTheme.borderColor, height: 18),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Auto-download on app open (overwrite)',
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: const Text(
+                      'When enabled, the app will download the latest cloud backup on startup and overwrite local data. A local restore point is saved first.',
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, height: 1.25),
+                    ),
+                    value: _autoDownloadOnOpen,
+                    onChanged: (val) async {
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setBool(DriveSyncService.prefAutoDownloadOnOpen, val);
+                      setState(() => _autoDownloadOnOpen = val);
                     },
                   ),
                 ],
@@ -172,10 +233,8 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                           if (!mounted) return;
                           if (!ok) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Sign-in cancelled/failed. On Windows, you must provide Desktop OAuth client ID/secret via --dart-define.',
-                                ),
+                              SnackBar(
+                                content: Text(_signInFailedMessage()),
                                 duration: Duration(seconds: 8),
                               ),
                             );
@@ -207,7 +266,14 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                           final ok = await DriveSyncService.instance.uploadLatest(json, allowDailySnapshot: true);
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(ok ? 'Uploaded to Google Drive.' : 'Upload failed (not signed in or misconfigured).')),
+                              SnackBar(
+                                content: Text(
+                                  ok
+                                      ? 'Uploaded to Google Drive.'
+                                      : 'Upload failed. Check “Last error” for details.',
+                                ),
+                                duration: const Duration(seconds: 8),
+                              ),
                             );
                           }
                           await _refresh();

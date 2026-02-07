@@ -20,6 +20,7 @@ import '../../shared/widgets/page_entrance.dart';
 import '../../shared/widgets/ai_inbox_bell_action.dart';
 import '../../shared/services/white_noise_library_service.dart';
 import '../../shared/services/flip_clock_sound_service.dart';
+import '../../shared/providers/device_identity_provider.dart';
 
 class FocusScreen extends ConsumerStatefulWidget {
   final String? initialMissionId;
@@ -268,6 +269,8 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
   @override
   Widget build(BuildContext context) {
     final userStats = ref.watch(userProvider);
+    final identity = ref.watch(deviceIdentityProvider).valueOrNull;
+    final myDeviceId = identity?.id;
     final focusState = userStats.focus;
     final missions = userStats.quests.where((q) => !q.completed).toList();
     
@@ -291,7 +294,11 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
        } catch (_) {}
     }
 
-    final isRunning = selectedSession?.status == 'running';
+    final sessionDeviceId = selectedSession?.deviceId;
+    final isOwnedHere = (myDeviceId == null || sessionDeviceId == null) ? true : sessionDeviceId == myDeviceId;
+
+    final isRunning = selectedSession?.status == 'running' && isOwnedHere;
+    final isRunningRemote = selectedSession?.status == 'running' && !isOwnedHere;
     final isPaused = selectedSession?.status == 'paused';
     final isAbandoned = selectedSession?.status == 'abandoned';
     
@@ -305,7 +312,7 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
         : elapsedMs;
 
     // Keep text fields in sync (without recreating controllers every build)
-    if (!isRunning && !isPaused) {
+    if (!isRunning && !isPaused && !isRunningRemote) {
       final focusText = settings.pomodoro.focusMinutes.toString();
       if (_pomoFocusController.text != focusText) {
         _pomoFocusController.text = focusText;
@@ -469,7 +476,7 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                     const SizedBox(height: 12),
 
                     // Mission selector
-                    _buildMissionSelector(missions, isRunning || isPaused),
+                    _buildMissionSelector(missions, isRunning || isPaused || isRunningRemote),
 
                     const SizedBox(height: 18),
 
@@ -590,7 +597,7 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
 
                     const SizedBox(height: 16),
 
-                    _buildControls(ref, selectedSession, isRunning, isPaused, isAbandoned),
+                    _buildControls(ref, selectedSession, isRunning, isRunningRemote, isPaused, isAbandoned),
 
                     const SizedBox(height: 14),
                     _buildWhiteNoiseControls(ref, settings),
@@ -1106,7 +1113,14 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
      );
   }
 
-  Widget _buildControls(WidgetRef ref, FocusOpenSession? session, bool isRunning, bool isPaused, bool isAbandoned) {
+  Widget _buildControls(
+    WidgetRef ref,
+    FocusOpenSession? session,
+    bool isRunning,
+    bool isRunningRemote,
+    bool isPaused,
+    bool isAbandoned,
+  ) {
     if (isAbandoned) {
       return CyberButton(
         text: "Rejoin Mission",
@@ -1115,6 +1129,45 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
         onPressed: () {
           ref.read(userProvider.notifier).rejoinMission(_selectedMissionId);
         },
+      );
+    }
+
+    if (isRunningRemote) {
+      final deviceLabel = session?.deviceLabel?.trim();
+      final who = (deviceLabel != null && deviceLabel.isNotEmpty) ? deviceLabel : 'another device';
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CyberCard(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Running on $who',
+                  style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'You can take over this session here. Time will continue (not restart).',
+                  style: TextStyle(color: AppTheme.textSecondary, height: 1.35),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          CyberButton(
+            text: 'Continue on this device',
+            fullWidth: true,
+            icon: LucideIcons.arrowRight,
+            onPressed: session == null
+                ? null
+                : () {
+                    unawaited(ref.read(userProvider.notifier).continueOpenSessionOnThisDevice(session.id));
+                  },
+          ),
+        ],
       );
     }
     

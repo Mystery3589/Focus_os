@@ -1,4 +1,6 @@
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -11,11 +13,13 @@ import '../../shared/widgets/cyber_card.dart';
 import '../../shared/widgets/ai_inbox_bell_action.dart';
 import '../../shared/widgets/app_toast.dart';
 import '../../shared/widgets/page_entrance.dart';
+import '../../shared/widgets/page_container.dart';
 import '../../shared/widgets/quest_card.dart';
 import '../../shared/widgets/mission_dialog.dart';
 import '../../shared/models/quest.dart';
 import '../../shared/models/focus_session.dart';
 import '../../shared/services/quest_sorting_service.dart';
+import '../../shared/providers/device_identity_provider.dart';
 
 class QuestsScreen extends ConsumerStatefulWidget {
   const QuestsScreen({super.key});
@@ -496,6 +500,11 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
     final activeQuests = _filterAndSortQuests(userStats.quests, false, openSessions);
     final completedQuests = _filterAndSortQuests(userStats.quests, true, openSessions);
 
+    // Keep the header compact and bounded so it doesn't steal space from the
+    // missions list or leave large unused space at the bottom on desktop.
+    final screenH = MediaQuery.sizeOf(context).height;
+    final maxHeaderHeight = (screenH * 0.34).clamp(180.0, 320.0);
+
     return Scaffold(
       // When the keyboard opens (including from modal dialogs), the viewInsets
       // reduce available height. Keep this page layout resilient to those
@@ -515,142 +524,147 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
       ),
       body: PageEntrance(
         child: SafeArea(
-          child: Column(
-            children: [
-              // Search / Sort / Filters can be tall. When the keyboard is open,
-              // allow this section to scroll instead of overflowing.
-              Flexible(
-                fit: FlexFit.loose,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    children: [
-                      CyberCard(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Row(
-                          children: [
-                            const Icon(LucideIcons.search, size: 16, color: AppTheme.textSecondary),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: TextField(
-                                controller: _searchController,
-                                onChanged: (val) => setState(() {}),
-                                decoration: const InputDecoration(
-                                  hintText: "Search missions...",
-                                  border: InputBorder.none,
-                                  isDense: true,
+          child: PageContainer(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                // Search / Sort / Filters can be tall. When the keyboard is
+                // open, allow this section to scroll (bounded), without using
+                // flex sizing (which can leave a big empty area at the bottom
+                // and shrink the missions list viewport).
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: maxHeaderHeight),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      children: [
+                        CyberCard(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Row(
+                            children: [
+                              const Icon(LucideIcons.search, size: 16, color: AppTheme.textSecondary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: TextField(
+                                  controller: _searchController,
+                                  onChanged: (val) => setState(() {}),
+                                  decoration: const InputDecoration(
+                                    hintText: "Search missions...",
+                                    border: InputBorder.none,
+                                    isDense: true,
+                                  ),
+                                  style: const TextStyle(color: AppTheme.textPrimary),
                                 ),
-                                style: const TextStyle(color: AppTheme.textPrimary),
                               ),
-                            ),
-                            if (_searchController.text.isNotEmpty)
-                              IconButton(
-                                tooltip: 'Clear search',
-                                icon: const Icon(LucideIcons.x, size: 16, color: AppTheme.textSecondary),
-                                onPressed: () {
-                                  _searchController.clear();
-                                  setState(() {});
-                                },
-                              ),
-                          ],
+                              if (_searchController.text.isNotEmpty)
+                                IconButton(
+                                  tooltip: 'Clear search',
+                                  icon: const Icon(LucideIcons.x, size: 16, color: AppTheme.textSecondary),
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    setState(() {});
+                                  },
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      CyberCard(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final isNarrow = constraints.maxWidth < 520;
+                        const SizedBox(height: 16),
+                        CyberCard(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final isNarrow = constraints.maxWidth < 520;
 
-                            final sortButton = TextButton.icon(
-                              onPressed: () => _openSortAndFilterDialog(userStats),
-                              icon: const Icon(LucideIcons.slidersHorizontal, size: 16, color: AppTheme.textSecondary),
-                              label: Text(
-                                _activeFilterCount > 0 ? 'Sort & Filter ($_activeFilterCount)' : 'Sort & Filter',
-                                style: const TextStyle(color: AppTheme.textSecondary),
-                              ),
-                            );
+                              final sortButton = TextButton.icon(
+                                onPressed: () => _openSortAndFilterDialog(userStats),
+                                icon: const Icon(LucideIcons.slidersHorizontal, size: 16, color: AppTheme.textSecondary),
+                                label: Text(
+                                  _activeFilterCount > 0 ? 'Sort & Filter ($_activeFilterCount)' : 'Sort & Filter',
+                                  style: const TextStyle(color: AppTheme.textSecondary),
+                                ),
+                              );
 
-                            final clearButton = TextButton.icon(
-                              onPressed: _activeFilterCount == 0 ? null : _clearFilters,
-                              icon: const Icon(LucideIcons.rotateCcw, size: 16, color: AppTheme.textSecondary),
-                              label: const Text('Clear', style: TextStyle(color: AppTheme.textSecondary)),
-                            );
+                              final clearButton = TextButton.icon(
+                                onPressed: _activeFilterCount == 0 ? null : _clearFilters,
+                                icon: const Icon(LucideIcons.rotateCcw, size: 16, color: AppTheme.textSecondary),
+                                label: const Text('Clear', style: TextStyle(color: AppTheme.textSecondary)),
+                              );
 
-                            final addButton = ElevatedButton.icon(
-                              onPressed: () => showMissionDialog(context, ref),
-                              icon: const Icon(LucideIcons.plus, size: 16),
-                              label: const Text('New'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.primary,
-                                foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              ),
-                            );
+                              final addButton = ElevatedButton.icon(
+                                onPressed: () => showMissionDialog(context, ref),
+                                icon: const Icon(LucideIcons.plus, size: 16),
+                                label: const Text('New'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppTheme.primary,
+                                  foregroundColor: Colors.black,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                ),
+                              );
 
-                            final sortLabel = Text(
-                              _activeFilterCount > 0
-                                  ? '$_sortByLabel • $_activeFilterCount filter${_activeFilterCount == 1 ? '' : 's'}'
-                                  : _sortByLabel,
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                            );
+                              final sortLabel = Text(
+                                _activeFilterCount > 0
+                                    ? '$_sortByLabel • $_activeFilterCount filter${_activeFilterCount == 1 ? '' : 's'}'
+                                    : _sortByLabel,
+                                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              );
 
-                            if (isNarrow) {
-                              return Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                crossAxisAlignment: WrapCrossAlignment.center,
+                              if (isNarrow) {
+                                return Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    sortButton,
+                                    clearButton,
+                                    addButton,
+                                    sortLabel,
+                                  ],
+                                );
+                              }
+
+                              return Row(
                                 children: [
                                   sortButton,
                                   clearButton,
+                                  const SizedBox(width: 10),
+                                  Expanded(child: sortLabel),
+                                  const SizedBox(width: 10),
                                   addButton,
-                                  sortLabel,
                                 ],
                               );
-                            }
-
-                            return Row(
-                              children: [
-                                sortButton,
-                                clearButton,
-                                const SizedBox(width: 10),
-                                Expanded(child: sortLabel),
-                                const SizedBox(width: 10),
-                                addButton,
-                              ],
-                            );
-                          },
+                            },
+                          ),
                         ),
-                      ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Tab Bar
+                TabBar(
+                  controller: _tabController,
+                  indicatorColor: AppTheme.primary,
+                  labelColor: AppTheme.primary,
+                  unselectedLabelColor: AppTheme.textSecondary,
+                  tabs: const [
+                    Tab(text: "Active"),
+                    Tab(text: "Completed"),
+                  ],
+                ),
+
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildQuestList(activeQuests, isActive: true),
+                      _buildQuestList(completedQuests, isActive: false),
                     ],
                   ),
                 ),
-              ),
-
-              // Tab Bar
-              TabBar(
-                controller: _tabController,
-                indicatorColor: AppTheme.primary,
-                labelColor: AppTheme.primary,
-                unselectedLabelColor: AppTheme.textSecondary,
-                tabs: const [
-                  Tab(text: "Active"),
-                  Tab(text: "Completed"),
-                ],
-              ),
-
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildQuestList(activeQuests, isActive: true),
-                    _buildQuestList(completedQuests, isActive: false),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -659,6 +673,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
   }
 
   Widget _buildQuestList(List<Quest> quests, {required bool isActive}) {
+    final myDeviceId = ref.watch(deviceIdentityProvider).valueOrNull?.id;
     if (quests.isEmpty) {
       return LayoutBuilder(
         builder: (context, constraints) {
@@ -799,14 +814,25 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
         final isRunning = status == 'running';
         final isAbandoned = status == 'abandoned';
 
+        final ownedByOtherDevice =
+          isRunning &&
+          myDeviceId != null &&
+          session?.deviceId != null &&
+          session!.deviceId != myDeviceId;
+
         final anyOpen = blockingSession != null;
         final isOtherMissionOpen = anyOpen && blockingSession.questId != quest.id;
 
         String? statusLabel;
         Color? statusColor;
         if (isRunning) {
-          statusLabel = 'RUNNING';
-          statusColor = Colors.greenAccent;
+          if (ownedByOtherDevice) {
+            statusLabel = 'RUNNING (OTHER DEVICE)';
+            statusColor = Colors.lightBlueAccent;
+          } else {
+            statusLabel = 'RUNNING';
+            statusColor = Colors.greenAccent;
+          }
         } else if (isPaused) {
           statusLabel = 'PAUSED';
           statusColor = Colors.amberAccent;
@@ -817,7 +843,10 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
 
         String startLabel = 'Start';
         IconData startIcon = LucideIcons.play;
-        if (isRunning) {
+        if (ownedByOtherDevice) {
+          startLabel = 'Continue here';
+          startIcon = LucideIcons.arrowRight;
+        } else if (isRunning) {
           startLabel = 'Open';
           startIcon = LucideIcons.externalLink;
         } else if (isPaused) {
@@ -886,6 +915,15 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
                         message: 'Finish/resume $title before starting another mission.',
                       );
                       context.go('/focus?missionId=${blockingSession.questId}');
+                      return;
+                    }
+
+                    if (ownedByOtherDevice) {
+                      // Take over the running session and open Focus.
+                      if (session != null) {
+                        unawaited(ref.read(userProvider.notifier).continueOpenSessionOnThisDevice(session.id));
+                      }
+                      context.go('/focus?missionId=${quest.id}');
                       return;
                     }
 
@@ -1072,9 +1110,54 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> with SingleTickerPr
         if (isActive) ...[
           buildSection('TODAY', todayMissions),
           buildSection('EXTRA MISSIONS', extraMissions),
+          if (extraMissions.isEmpty) ...[
+            const SizedBox(height: 10),
+            CyberCard(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(LucideIcons.sparkles, size: 18, color: AppTheme.primary),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'You’re caught up',
+                          style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'No extra missions scheduled beyond today. Add a new mission when you’re ready.',
+                          style: TextStyle(color: AppTheme.textSecondary, height: 1.35),
+                        ),
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: ElevatedButton.icon(
+                            onPressed: () => showMissionDialog(context, ref),
+                            icon: const Icon(LucideIcons.plus, size: 16),
+                            label: const Text('Create mission'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primary,
+                              foregroundColor: Colors.black,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ] else ...[
           buildSection('COMPLETED', quests),
-        ]
+        ],
+
+        // Ensure the last card/buttons can scroll fully above the bottom navbar.
+        SizedBox(height: 90 + MediaQuery.of(context).padding.bottom),
       ],
     );
   }

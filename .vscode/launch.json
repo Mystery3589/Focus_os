@@ -1,0 +1,37 @@
+{
+  // VS Code launch configurations for Flutter.
+  // These are purely developer conveniences and are not shipped with the app.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Disciplo (Windows) — load .env",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "debug",
+      "deviceId": "windows",
+      "args": [
+        "--dart-define-from-file=.env"
+      ]
+    },
+    {
+      "name": "Disciplo (Windows) — Release (load .env)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "release",
+      "deviceId": "windows",
+      "args": [
+        "--dart-define-from-file=.env"
+      ]
+    },
+    {
+      "name": "Disciplo (Android)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "debug",
+      "deviceId": "android",
+      "args": [
+        "--dart-define-from-file=.env"
+      ]
+    }
+  ]
+}

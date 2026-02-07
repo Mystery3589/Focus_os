@@ -11,7 +11,6 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'drive_desktop_oauth.dart';
-import 'open_url.dart';
 
 class DriveSyncStatus {
   final bool isSignedIn;
@@ -19,6 +18,8 @@ class DriveSyncStatus {
   final int? lastDownloadAtMs;
   final int? lastLocalSaveAtMs;
   final String? lastRemoteModifiedTimeRfc3339;
+  final String? lastError;
+  final int? lastErrorAtMs;
 
   const DriveSyncStatus({
     required this.isSignedIn,
@@ -26,6 +27,8 @@ class DriveSyncStatus {
     this.lastDownloadAtMs,
     this.lastLocalSaveAtMs,
     this.lastRemoteModifiedTimeRfc3339,
+    this.lastError,
+    this.lastErrorAtMs,
   });
 }
 
@@ -44,11 +47,15 @@ class DriveSyncService {
   static const String _latestFileName = 'focus_flutter_latest.json';
 
   static const String prefAutoUpload = 'driveSyncAutoUpload';
+  static const String prefAutoDownloadOnOpen = 'driveSyncAutoDownloadOnOpen';
   static const String prefLastUploadAtMs = 'driveSyncLastUploadAtMs';
   static const String prefLastDownloadAtMs = 'driveSyncLastDownloadAtMs';
+  static const String prefLastAutoDownloadAtMs = 'driveSyncLastAutoDownloadAtMs';
   static const String prefLastLocalSaveAtMs = 'driveSyncLastLocalSaveAtMs';
   static const String prefLastRemoteModified = 'driveSyncLastRemoteModified';
   static const String prefLastSnapshotAtMs = 'driveSyncLastSnapshotAtMs';
+  static const String prefLastError = 'driveSyncLastError';
+  static const String prefLastErrorAtMs = 'driveSyncLastErrorAtMs';
 
   static const String _prefDesktopCredsJson = 'driveSyncDesktopCredsJson';
 
@@ -60,6 +67,7 @@ class DriveSyncService {
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: <String>[drive.DriveApi.driveAppdataScope],
   );
+
 
   http.Client? _desktopAuthClient;
   AccessCredentials? _desktopCreds;
@@ -105,15 +113,42 @@ class DriveSyncService {
     try {
       return await fn().timeout(const Duration(seconds: 12));
     } on TimeoutException {
+      await _setLastError('Timed out while contacting Google.');
       debugPrint('DriveSyncService: sign-in timed out.');
       return null;
     } on MissingPluginException catch (e) {
+      await _setLastError('Missing plugin implementation: $e');
       debugPrint('DriveSyncService: missing plugin implementation: $e');
       return null;
     } catch (e) {
+      await _setLastError('Google auth failed: $e');
       debugPrint('DriveSyncService: sign-in failed: $e');
       return null;
     }
+  }
+
+  Future<void> _setLastError(String message) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(prefLastError, message);
+      await prefs.setInt(prefLastErrorAtMs, DateTime.now().millisecondsSinceEpoch);
+    } catch (_) {
+      // Best-effort: never let logging fail the app.
+    }
+  }
+
+  Future<void> _clearLastError() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(prefLastError);
+      await prefs.remove(prefLastErrorAtMs);
+    } catch (_) {}
+  }
+
+  String _formatApiError(Object e) {
+    // Keep this compatible across googleapis versions.
+    // googleapis errors usually include HTTP status + details in toString().
+    return e.toString();
   }
 
   Future<void> _restoreDesktopClientIfNeeded() async {
@@ -232,10 +267,12 @@ class DriveSyncService {
       _desktopCreds = null;
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_prefDesktopCredsJson);
+      await _clearLastError();
       return;
     }
     try {
       await _googleSignIn.signOut().timeout(const Duration(seconds: 8));
+      await _clearLastError();
     } catch (_) {
       // Ignore best-effort sign-out failures.
     }
@@ -249,6 +286,8 @@ class DriveSyncService {
       lastDownloadAtMs: prefs.getInt(prefLastDownloadAtMs),
       lastLocalSaveAtMs: prefs.getInt(prefLastLocalSaveAtMs),
       lastRemoteModifiedTimeRfc3339: prefs.getString(prefLastRemoteModified),
+      lastError: prefs.getString(prefLastError),
+      lastErrorAtMs: prefs.getInt(prefLastErrorAtMs),
     );
   }
 
@@ -257,7 +296,10 @@ class DriveSyncService {
       await _restoreDesktopClientIfNeeded();
       final clientId = _desktopClientId;
       final creds0 = _desktopCreds;
-      if (clientId == null || creds0 == null) return null;
+      if (clientId == null || creds0 == null) {
+        await _setLastError('Not signed in (desktop) or missing OAuth client config.');
+        return null;
+      }
       var creds = creds0;
 
       // Refresh access token if it's close to expiring.
@@ -282,12 +324,23 @@ class DriveSyncService {
         }
         return null;
       });
-      if (authed == null) return null;
+      if (authed == null) {
+        await _setLastError('Failed to create authenticated client (desktop).');
+        return null;
+      }
       return drive.DriveApi(authed);
     }
 
+    // If the user previously signed in before Drive scope was requested, Drive
+    // API calls may fail. We can't reliably detect scope availability across
+    // all plugin versions, so we rely on requestScopes during interactive sign-in
+    // and surface any API errors via lastError.
+
     final client = await _guardedCall(() => _googleSignIn.authenticatedClient());
-    if (client == null) return null;
+    if (client == null) {
+      await _setLastError('Failed to get authenticated Google HTTP client. (Is Google Sign-In configured?)');
+      return null;
+    }
     return drive.DriveApi(client);
   }
 
@@ -316,116 +369,176 @@ class DriveSyncService {
     String json, {
     bool allowDailySnapshot = true,
   }) async {
-    final api = await _api();
-    if (api == null) return false;
+    try {
+      final api = await _api();
+      if (api == null) return false;
 
-    final fileId = await _findLatestFileId(api);
+      final fileId = await _findLatestFileId(api);
 
-    final exportedAtMs = DateTime.now().millisecondsSinceEpoch;
-    final media = drive.Media(
-      Stream<List<int>>.value(utf8.encode(json)),
-      json.length,
-      contentType: 'application/json',
-    );
-
-    final meta = drive.File(
-      name: _latestFileName,
-      parents: const ['appDataFolder'],
-      appProperties: {
-        'schemaVersion': '1',
-        'exportedAtMs': exportedAtMs.toString(),
-      },
-    );
-
-    drive.File updated;
-    if (fileId == null) {
-      updated = await api.files.create(
-        meta,
-        uploadMedia: media,
-        $fields: 'id,modifiedTime',
+      final exportedAtMs = DateTime.now().millisecondsSinceEpoch;
+      final bytes = utf8.encode(json);
+      final media = drive.Media(
+        Stream<List<int>>.value(bytes),
+        bytes.length,
+        contentType: 'application/json',
       );
-    } else {
-      updated = await api.files.update(
-        meta,
-        fileId,
-        uploadMedia: media,
-        $fields: 'id,modifiedTime',
+
+      // NOTE: `parents` is writable on create but NOT on update.
+      // For updates, Drive requires using addParents/removeParents instead.
+      // (Otherwise you get: "The parents field is not directly writable in update requests".)
+      final createMeta = drive.File(
+        name: _latestFileName,
+        parents: const ['appDataFolder'],
+        appProperties: {
+          'schemaVersion': '1',
+          'exportedAtMs': exportedAtMs.toString(),
+        },
       );
-    }
+      final updateMeta = drive.File(
+        name: _latestFileName,
+        appProperties: {
+          'schemaVersion': '1',
+          'exportedAtMs': exportedAtMs.toString(),
+        },
+      );
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(prefLastUploadAtMs, exportedAtMs);
-    if (updated.modifiedTime != null) {
-      await prefs.setString(prefLastRemoteModified, updated.modifiedTime!.toUtc().toIso8601String());
-    }
+      drive.File updated;
+      if (fileId == null) {
+        updated = await api.files.create(
+          createMeta,
+          uploadMedia: media,
+          $fields: 'id,modifiedTime',
+        );
+      } else {
+        updated = await api.files.update(
+          updateMeta,
+          fileId,
+          uploadMedia: media,
+          $fields: 'id,modifiedTime',
+        );
+      }
 
-    if (allowDailySnapshot) {
-      await _maybeCreateDailySnapshot(api, updated.id!, exportedAtMs);
-    }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(prefLastUploadAtMs, exportedAtMs);
+      if (updated.modifiedTime != null) {
+        await prefs.setString(prefLastRemoteModified, updated.modifiedTime!.toUtc().toIso8601String());
+      }
 
-    return true;
+      if (allowDailySnapshot) {
+        await _maybeCreateDailySnapshot(api, updated.id!, exportedAtMs);
+      }
+
+      await _clearLastError();
+      return true;
+    } catch (e) {
+      final msg = _formatApiError(e);
+      await _setLastError(msg);
+      debugPrint('DriveSyncService: uploadLatest failed: $msg');
+      return false;
+    }
   }
 
   /// Downloads the "latest" backup JSON.
   /// Returns null if nothing exists or not signed-in.
   Future<DriveDownloadResult?> downloadLatest() async {
-    final api = await _api();
-    if (api == null) return null;
+    try {
+      final api = await _api();
+      if (api == null) return null;
 
-    final fileId = await _findLatestFileId(api);
-    if (fileId == null) return null;
+      final fileId = await _findLatestFileId(api);
+      if (fileId == null) return null;
 
-    final meta = await api.files.get(
-      fileId,
-      $fields: 'id,modifiedTime',
-    ) as drive.File;
+      final meta = await api.files.get(
+        fileId,
+        $fields: 'id,modifiedTime',
+      ) as drive.File;
 
-    final media = await api.files.get(
-      fileId,
-      downloadOptions: drive.DownloadOptions.fullMedia,
-    );
+      final media = await api.files.get(
+        fileId,
+        downloadOptions: drive.DownloadOptions.fullMedia,
+      );
 
-    if (media is! drive.Media) return null;
+      if (media is! drive.Media) return null;
 
-    final bytes = <int>[];
-    await for (final chunk in media.stream) {
-      bytes.addAll(chunk);
+      final bytes = <int>[];
+      await for (final chunk in media.stream) {
+        bytes.addAll(chunk);
+      }
+
+      final json = utf8.decode(bytes);
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(prefLastDownloadAtMs, now);
+      if (meta.modifiedTime != null) {
+        await prefs.setString(prefLastRemoteModified, meta.modifiedTime!.toUtc().toIso8601String());
+      }
+
+      await _clearLastError();
+      return DriveDownloadResult(
+        json: json,
+        remoteModifiedTimeRfc3339: meta.modifiedTime?.toUtc().toIso8601String(),
+      );
+    } catch (e) {
+      final msg = _formatApiError(e);
+      await _setLastError(msg);
+      debugPrint('DriveSyncService: downloadLatest failed: $msg');
+      return null;
     }
+  }
 
-    final json = utf8.decode(bytes);
+  /// Returns the remote modifiedTime of the "latest" backup without downloading
+  /// the JSON payload.
+  ///
+  /// This is useful for cheap polling to detect remote changes.
+  Future<String?> peekLatestRemoteModifiedTimeRfc3339() async {
+    try {
+      final api = await _api();
+      if (api == null) return null;
 
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(prefLastDownloadAtMs, now);
-    if (meta.modifiedTime != null) {
-      await prefs.setString(prefLastRemoteModified, meta.modifiedTime!.toUtc().toIso8601String());
+      final fileId = await _findLatestFileId(api);
+      if (fileId == null) return null;
+
+      final meta = await api.files.get(
+        fileId,
+        $fields: 'id,modifiedTime',
+      ) as drive.File;
+
+      return meta.modifiedTime?.toUtc().toIso8601String();
+    } catch (e) {
+      final msg = _formatApiError(e);
+      await _setLastError(msg);
+      debugPrint('DriveSyncService: peek latest failed: $msg');
+      return null;
     }
-
-    return DriveDownloadResult(
-      json: json,
-      remoteModifiedTimeRfc3339: meta.modifiedTime?.toUtc().toIso8601String(),
-    );
   }
 
   Future<String?> _findLatestFileId(drive.DriveApi api) async {
-    final list = await api.files.list(
-      spaces: 'appDataFolder',
-      q: "name='$_latestFileName' and trashed=false",
-      $fields: 'files(id,name,modifiedTime)',
-      pageSize: 5,
-    );
+    try {
+      final list = await api.files.list(
+        spaces: 'appDataFolder',
+        q: "name='$_latestFileName' and trashed=false",
+        $fields: 'files(id,name,modifiedTime)',
+        pageSize: 5,
+      );
 
-    final files = list.files ?? const <drive.File>[];
-    if (files.isEmpty) return null;
+      final files = list.files ?? const <drive.File>[];
+      if (files.isEmpty) return null;
 
-    // If duplicates exist, prefer newest.
-    files.sort((a, b) {
-      final at = a.modifiedTime?.millisecondsSinceEpoch ?? 0;
-      final bt = b.modifiedTime?.millisecondsSinceEpoch ?? 0;
-      return bt.compareTo(at);
-    });
+      // If duplicates exist, prefer newest.
+      files.sort((a, b) {
+        final at = a.modifiedTime?.millisecondsSinceEpoch ?? 0;
+        final bt = b.modifiedTime?.millisecondsSinceEpoch ?? 0;
+        return bt.compareTo(at);
+      });
 
-    return files.first.id;
+      return files.first.id;
+    } catch (e) {
+      final msg = _formatApiError(e);
+      await _setLastError(msg);
+      debugPrint('DriveSyncService: list latest failed: $msg');
+      return null;
+    }
   }
 
   Future<void> _maybeCreateDailySnapshot(drive.DriveApi api, String latestFileId, int exportedAtMs) async {
@@ -441,19 +554,27 @@ class DriveSyncService {
     final stamp = nowDate.toUtc().toIso8601String().replaceAll(':', '').replaceAll('.', '');
     final snapshotName = 'focus_flutter_snapshot_$stamp.json';
 
-    await api.files.copy(
-      drive.File(
-        name: snapshotName,
-        parents: const ['appDataFolder'],
-        appProperties: {
-          'schemaVersion': '1',
-          'snapshotOf': _latestFileName,
-          'exportedAtMs': exportedAtMs.toString(),
-        },
-      ),
-      latestFileId,
-      $fields: 'id',
-    );
+    try {
+      await api.files.copy(
+        drive.File(
+          name: snapshotName,
+          parents: const ['appDataFolder'],
+          appProperties: {
+            'schemaVersion': '1',
+            'snapshotOf': _latestFileName,
+            'exportedAtMs': exportedAtMs.toString(),
+          },
+        ),
+        latestFileId,
+        $fields: 'id',
+      );
+    } catch (e) {
+      // Snapshot is best-effort; we still want the main upload to be considered successful.
+      final msg = _formatApiError(e);
+      await _setLastError('Snapshot failed: $msg');
+      debugPrint('DriveSyncService: snapshot copy failed: $msg');
+      return;
+    }
 
     await prefs.setInt(prefLastSnapshotAtMs, exportedAtMs);
   }

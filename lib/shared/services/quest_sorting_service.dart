@@ -17,18 +17,85 @@ class QuestSortRule {
   const QuestSortRule(this.field, this.ascending);
 }
 
+String _norm(String s) => s.trim().toUpperCase();
+
+/// Normalize priority into a comparable rank.
+///
+/// Supports both:
+/// - New scheme: S/A/B/C/D
+/// - Legacy scheme: High/Medium/Low
+int _priorityRank(String priority) {
+  final p = _norm(priority);
+  switch (p) {
+    case 'S':
+      return 5;
+    case 'A':
+      return 4;
+    case 'B':
+      return 3;
+    case 'C':
+      return 2;
+    case 'D':
+      return 1;
+    case 'HIGH':
+      return 5;
+    case 'MEDIUM':
+      return 3;
+    case 'LOW':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/// Normalize difficulty into a comparable rank.
+///
+/// Supports:
+/// - S/A/B/C/D/E
+/// - Easy/Medium/Hard (legacy)
+int _difficultyRank(String difficulty) {
+  final d = _norm(difficulty);
+  switch (d) {
+    case 'S':
+      return 6;
+    case 'A':
+      return 5;
+    case 'B':
+      return 4;
+    case 'C':
+      return 3;
+    case 'D':
+      return 2;
+    case 'E':
+      return 1;
+    case 'HARD':
+      return 5;
+    case 'MEDIUM':
+      return 3;
+    case 'EASY':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+String _normalizeFrequency(String? frequency) {
+  final f = (frequency ?? '').trim().toLowerCase();
+  if (f.isEmpty) return 'none';
+  if (f == 'one-time' || f == 'onetime' || f == 'one_time') return 'none';
+  return f;
+}
+
 int questDifficultyRank(String difficulty) {
-  const order = {'S': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1};
-  return order[difficulty.toUpperCase()] ?? 0;
+  return _difficultyRank(difficulty);
 }
 
 int questPriorityRank(String priority) {
-  const order = {'S': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1};
-  return order[priority.toUpperCase()] ?? 0;
+  return _priorityRank(priority);
 }
 
 int questFrequencyRank(String? frequency) {
-  final f = (frequency ?? 'none').toLowerCase();
+  final f = _normalizeFrequency(frequency);
   const order = {
     'none': 0,
     'daily': 1,
@@ -41,9 +108,38 @@ int questFrequencyRank(String? frequency) {
 
 bool questMatchesTypeFilter(Quest q, String typeFilter) {
   if (typeFilter == 'all') return true;
-  final f = (q.frequency ?? 'none').toLowerCase();
+  final f = _normalizeFrequency(q.frequency);
   if (typeFilter == 'one-time') return f == 'none';
   return f == typeFilter;
+}
+
+String _normalizeDifficultyForFilter(String difficulty) {
+  // Keep filter values as S/A/B/C/D/E when possible.
+  final d = _norm(difficulty);
+  switch (d) {
+    case 'EASY':
+      return 'D';
+    case 'MEDIUM':
+      return 'B';
+    case 'HARD':
+      return 'S';
+    default:
+      return d;
+  }
+}
+
+String _normalizePriorityForFilter(String priority) {
+  final p = _norm(priority);
+  switch (p) {
+    case 'HIGH':
+      return 'S';
+    case 'MEDIUM':
+      return 'B';
+    case 'LOW':
+      return 'D';
+    default:
+      return p;
+  }
 }
 
 String? questStatusForQuestId(String questId, List<FocusOpenSession> openSessions) {
@@ -143,9 +239,9 @@ List<Quest> filterAndSortQuests({
 
     if (skillFilterId != null && q.skillId != skillFilterId) return false;
 
-    if (difficultyFilter != 'all' && q.difficulty.toUpperCase() != difficultyFilter) return false;
+    if (difficultyFilter != 'all' && _normalizeDifficultyForFilter(q.difficulty) != difficultyFilter) return false;
 
-    if (priorityFilter != 'all' && q.priority.toUpperCase() != priorityFilter) return false;
+    if (priorityFilter != 'all' && _normalizePriorityForFilter(q.priority) != priorityFilter) return false;
 
     if (!questMatchesTypeFilter(q, typeFilter)) return false;
 

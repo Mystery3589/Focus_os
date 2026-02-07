@@ -1,18 +1,58 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../config/theme.dart';
+import '../providers/user_provider.dart';
 
-class AppShell extends ConsumerWidget {
+class AppShell extends ConsumerStatefulWidget {
   final Widget child;
   final String currentRoute;
 
   const AppShell({super.key, required this.child, required this.currentRoute});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(body: child, bottomNavigationBar: _buildBottomNav(context));
+  ConsumerState<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends ConsumerState<AppShell> with WidgetsBindingObserver {
+  Timer? _drivePoll;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // Poll Drive periodically so uploads on other devices are pulled in.
+    _drivePoll = Timer.periodic(const Duration(seconds: 20), (_) {
+      unawaited(ref.read(userProvider.notifier).syncFromDriveIfRemoteNewer());
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ref.read(userProvider.notifier).syncFromDriveIfRemoteNewer());
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _drivePoll?.cancel();
+    _drivePoll = null;
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ref.read(userProvider.notifier).syncFromDriveIfRemoteNewer());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(body: widget.child, bottomNavigationBar: _buildBottomNav(context));
   }
 
   Widget _buildBottomNav(BuildContext context) {
@@ -54,7 +94,7 @@ class AppShell extends ConsumerWidget {
       ),
     ];
 
-    int currentIndex = items.indexWhere((item) => item.route == currentRoute);
+    int currentIndex = items.indexWhere((item) => item.route == widget.currentRoute);
     if (currentIndex == -1) currentIndex = 0;
 
     return Container(
@@ -63,13 +103,8 @@ class AppShell extends ConsumerWidget {
         border: Border(
           top: BorderSide(color: AppTheme.borderColor.withOpacity(0.3)),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.primary.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
-          ),
-        ],
+        // Avoid painting a shadow over the page content above the navbar.
+        // The glow/shadow made the Missions list look like it was being covered.
       ),
       child: SafeArea(
         child: Container(

@@ -388,6 +388,20 @@ class FocusOpenSession {
   final String status; // "running", "paused", "abandoned"
   final List<FocusSegment> segments;
 
+  /// Which device currently “owns” the running session.
+  ///
+  /// When a session is continued on another device, this value switches to the
+  /// new device id. Used only for UI/UX and cross-device safety.
+  final String? deviceId;
+
+  /// Friendly label for [deviceId] (e.g. "android ab12").
+  final String? deviceLabel;
+
+  /// Last time (ms since epoch) the owning device updated this session.
+  ///
+  /// Best-effort, used to detect stale sessions.
+  final int? lastHeartbeatAtMs;
+
   /// Breaks are suggested when pausing after this many total focus minutes.
   final int nextBreakAtTotalMinutes;
   final int breakOffers;
@@ -401,6 +415,9 @@ class FocusOpenSession {
     required this.createdAt,
     required this.status,
     required this.segments,
+    this.deviceId,
+    this.deviceLabel,
+    this.lastHeartbeatAtMs,
     this.nextBreakAtTotalMinutes = 60,
     this.breakOffers = 0,
     this.breaksTaken = 0,
@@ -421,6 +438,11 @@ class FocusOpenSession {
       createdAt: json['createdAt'],
       status: json['status'],
       segments: (json['segments'] as List).map((s) => FocusSegment.fromJson(s)).toList(),
+      deviceId: json['deviceId'],
+      deviceLabel: json['deviceLabel'],
+      lastHeartbeatAtMs: (json['lastHeartbeatAtMs'] is int)
+          ? json['lastHeartbeatAtMs']
+          : (json['lastHeartbeatAtMs'] is num ? (json['lastHeartbeatAtMs'] as num).toInt() : null),
       nextBreakAtTotalMinutes: asInt(json['nextBreakAtTotalMinutes'], 60),
       breakOffers: asInt(json['breakOffers'], 0),
       breaksTaken: asInt(json['breaksTaken'], 0),
@@ -436,6 +458,9 @@ class FocusOpenSession {
       'createdAt': createdAt,
       'status': status,
       'segments': segments.map((s) => s.toJson()).toList(),
+      'deviceId': deviceId,
+      'deviceLabel': deviceLabel,
+      'lastHeartbeatAtMs': lastHeartbeatAtMs,
       'nextBreakAtTotalMinutes': nextBreakAtTotalMinutes,
       'breakOffers': breakOffers,
       'breaksTaken': breaksTaken,
